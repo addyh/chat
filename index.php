@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 )
 ");
 
+/* CREATE USERS TABLE */
+$pdo->exec("
+    CREATE TABLE IF NOT EXISTS chat_users (
+        sender_id VARCHAR(64) PRIMARY KEY,
+        last_seen TIMESTAMP NOT NULL
+        DEFAULT CURRENT_TIMESTAMP
+    )
+");
+
 /* ADD SENDER ID AND COLOR AND POSITION TO EXISTING TABLE */
 try {
     $pdo->exec("
@@ -118,6 +127,43 @@ if (($_GET['action'] ?? '') === 'fetch') {
 }
 
 
+/* ONLINE USERS */
+
+if (($_POST['action'] ?? '') === 'online') {
+
+    header('Content-Type: application/json');
+
+    $senderId = $_COOKIE['chat_id'] ?? '';
+
+    if (!preg_match('/^[a-f0-9]{32}$/', $senderId)) {
+        echo json_encode(['success' => false]);
+        exit;
+    }
+
+    // Update this visitor's last activity
+    $stmt = $pdo->prepare("
+        INSERT INTO chat_users (sender_id, last_seen)
+        VALUES (?, NOW())
+        ON DUPLICATE KEY UPDATE last_seen = NOW()
+    ");
+
+    $stmt->execute([$senderId]);
+
+    // Count visitors active within the last few seconds
+    $count = $pdo->query("
+        SELECT COUNT(*)
+        FROM chat_users
+        WHERE last_seen >= NOW() - INTERVAL 3 SECOND
+    ")->fetchColumn();
+
+    echo json_encode([
+        'success' => true,
+        'online' => (int)$count
+    ]);
+
+    exit;
+}
+
 /* LOAD ALL PREVIOUS MESSAGES */
 $initialMessages = $pdo->query("
     SELECT id, message, created_at, sender_id, sender_color, bubble_position
@@ -178,6 +224,23 @@ body {
     font-size: 12px;
     margin-top: 6px;
     opacity: .8;
+}
+
+.online-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 7px;
+    font-size: 11px;
+    opacity: .9;
+}
+
+.online-indicator {
+    width: 7px;
+    height: 7px;
+    background: #4ade80;
+    border-radius: 50%;
+    box-shadow: 0 0 5px #4ade80;
 }
 
 .color-picker-area {
@@ -287,6 +350,10 @@ body {
             <div class="header-text">
                 <h3><?= htmlspecialchars($page_header) ?></h3>
                 <div class="status"><?= htmlspecialchars($page_status) ?></div>
+                <div class="online-count">
+                    <span class="online-indicator"></span>
+                    <span id="onlineCount">online</span>
+                </div>
             </div>
 
             <div class="color-picker-area">
@@ -612,6 +679,42 @@ setInterval(loadMessages, 1000);
 /* SCROLL TO LATEST MESSAGE ON OPEN */
 
 messages.scrollTop = messages.scrollHeight;
+
+
+
+/* ONLINE USERS COUNTER */
+
+async function updateOnlineCount() {
+
+    try {
+
+        const formData = new FormData();
+        formData.append('action', 'online');
+
+        const response = await fetch('', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('onlineCount').textContent =
+                data.online + (data.online === 1 ? ' online' : ' online');
+        }
+
+    } catch (error) {
+        console.error('Online counter failed:', error);
+    }
+}
+
+// Update immediately
+updateOnlineCount();
+
+// Update every 10 seconds
+setInterval(updateOnlineCount, 2000);
 
 </script>
 
