@@ -160,10 +160,17 @@ body {
 .header {
     background: #2563eb;
     color: white;
-    padding: 20px;
+    padding: 15px 20px;
 }
 
-.header h3 {
+.header-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+}
+
+.header-text h3 {
     margin: 0;
 }
 
@@ -171,6 +178,20 @@ body {
     font-size: 12px;
     margin-top: 6px;
     opacity: .8;
+}
+
+.color-picker-area {
+    display: flex;
+    align-items: center;
+}
+
+.color-picker-area input {
+    width: 38px;
+    height: 30px;
+    padding: 0;
+    border: 2px solid white;
+    background: transparent;
+    cursor: pointer;
 }
 
 .messages {
@@ -262,8 +283,16 @@ body {
 <div class="chat-container">
 
     <div class="header">
-        <h3><?= htmlspecialchars($page_header) ?></h3>
-        <div class="status"><?= htmlspecialchars($page_status) ?></div>
+        <div class="header-content">
+            <div class="header-text">
+                <h3><?= htmlspecialchars($page_header) ?></h3>
+                <div class="status"><?= htmlspecialchars($page_status) ?></div>
+            </div>
+
+            <div class="color-picker-area">
+                <input type="color" id="bubbleColor" title="Change bubble color">
+            </div>
+        </div>
     </div>
 
     <div class="messages" id="messages">
@@ -304,7 +333,7 @@ const messages = document.getElementById('messages');
 const messageInput = document.getElementById('message');
 const chatForm = document.getElementById('chatForm');
 const sendButton = document.getElementById('sendButton');
-
+const bubbleColorPicker = document.getElementById('bubbleColor');
 
 /* COOKIE HELPERS */
 
@@ -363,6 +392,26 @@ if (!senderColor || !/^#[a-fA-F0-9]{6}$/.test(senderColor)) {
     senderColor = randomColor();
     setCookie('chat_color', senderColor);
 }
+
+/* BUBBLE COLOR PICKER */
+
+bubbleColorPicker.value = senderColor;
+
+bubbleColorPicker.addEventListener('input', function() {
+
+    senderColor = this.value;
+
+    // Save selected color
+    setCookie('chat_color', senderColor);
+
+    // Update existing messages belonging to this browser
+    // document.querySelectorAll('.message').forEach(div => {
+    //     if (div.dataset.senderId === senderId) {
+    //         div.style.backgroundColor = senderColor;
+    //     }
+    // });
+
+});
 
 
 /* CHAT IDENTITY */
@@ -493,6 +542,29 @@ chatForm.addEventListener('submit', async function(e) {
     const text = messageInput.value.trim();
 
     if (!text) return;
+
+    // CHAT COMMANDS
+    if (text.toLowerCase() === '/left') {
+
+        bubblePosition = 'left';
+        setCookie('chat_position', 'left');
+
+        messageInput.value = '';
+        messageInput.focus();
+
+        return;
+    }
+
+    if (text.toLowerCase() === '/right') {
+
+        bubblePosition = 'right';
+        setCookie('chat_position', 'right');
+
+        messageInput.value = '';
+        messageInput.focus();
+
+        return;
+    }
 
     sendButton.disabled = true;
 
