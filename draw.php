@@ -1,5 +1,8 @@
-
 <?php
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
+
 session_start();
 
 /* DATABASE SETTINGS */
@@ -48,9 +51,9 @@ $pdo->exec("
         sender_id VARCHAR(64) NOT NULL,
         color VARCHAR(7) NOT NULL,
         x1 DECIMAL(9,7) NOT NULL,
-        y1 DECIMAL(9,7) NOT NULL,
+        y1 DECIMAL(12,3) NOT NULL,
         x2 DECIMAL(9,7) NOT NULL,
-        y2 DECIMAL(9,7) NOT NULL,
+        y2 DECIMAL(12,3) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX (created_at)
     )
@@ -206,14 +209,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             echo json_encode(['success' => false]);
             exit;
         }
-
+    
         $value = (float) $_POST[$key];
-
-        if ($value < 0 || $value > 1) {
+    
+        if ($value < 0 || $value > 1000000) {
             echo json_encode(['success' => false]);
             exit;
         }
-
+    
+        if (($key === 'x1' || $key === 'x2') && $value > 1) {
+            echo json_encode(['success' => false]);
+            exit;
+        }
+    
         $coords[] = $value;
     }
 
@@ -275,8 +283,13 @@ if (($_GET['action'] ?? '') === 'draw_fetch') {
 
 /* LOAD ALL PREVIOUS MESSAGES */
 $initialMessages = $pdo->query("
-    SELECT id, message, created_at, sender_id, sender_color, bubble_position
-    FROM chat_messages
+    SELECT *
+    FROM (
+        SELECT id, message, created_at, sender_id, sender_color, bubble_position
+        FROM chat_messages
+        ORDER BY id DESC
+        LIMIT 100
+    ) AS recent
     ORDER BY id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -448,8 +461,6 @@ body {
     }
 }
 
-/* MESSAGES + DRAWING AREA */
-
 .messages-stage {
     flex: 1;
     min-height: 0;
@@ -459,24 +470,26 @@ body {
 
 .messages {
     height: 100%;
-    flex: none;
+    position: relative;
     overflow-y: auto;
+    padding: 20px;
+    background: #f7f8fa;
 }
 
-/* DRAWING CANVAS */
+/* SHARED CANVAS */
 
 #drawingCanvas {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    top: 0;
+    left: 0;
+    display: block;
     z-index: 5;
     pointer-events: none;
 }
 
-/* ENABLE DRAWING MODE */
+/* DRAWING MODE */
 
-.messages-stage.drawing-active #drawingCanvas {
+.messages.drawing-active #drawingCanvas {
     pointer-events: auto;
     touch-action: none;
     cursor: crosshair;
@@ -489,17 +502,12 @@ body {
     top: 12px;
     right: 12px;
     z-index: 10;
-
     padding: 9px 15px;
     border: 1px solid #ddd;
     border-radius: 20px;
-
     background: white;
     color: #333;
-
     font-size: 13px;
-    font-weight: bold;
-
     cursor: pointer;
     box-shadow: 0 2px 8px #0002;
 }
@@ -534,6 +542,7 @@ body {
     </div>
 
     <div class="messages-stage" id="messagesStage">
+
         <div class="messages" id="messages">
 
             <?php foreach ($initialMessages as $msg): ?>
@@ -551,12 +560,10 @@ body {
 
             <?php endforeach; ?>
 
+            <canvas id="drawingCanvas"></canvas>
+
         </div>
 
-        <!-- SHARED DRAWING CANVAS -->
-        <canvas id="drawingCanvas"></canvas>
-
-        <!-- DRAWING TOGGLE -->
         <button type="button" id="drawToggle" class="draw-toggle">
             ✏️ Draw
         </button>
@@ -899,19 +906,18 @@ updateOnlineCount();
 setInterval(updateOnlineCount, 2000);
 
 
+
+
 /* ==================================
-   SHARED DRAWING SYSTEM
+   SHARED INFINITE CHAT CANVAS
 ================================== */
 
-const messagesStage = document.getElementById('messagesStage');
 const drawingCanvas = document.getElementById('drawingCanvas');
 const drawToggle = document.getElementById('drawToggle');
-
 const drawingCtx = drawingCanvas.getContext('2d');
 
 let drawingMode = false;
 let drawing = false;
-
 let previousPoint = null;
 
 let lastDrawingId = 0;
@@ -923,17 +929,27 @@ let drawSendQueue = Promise.resolve();
 
 
 /* ==================================
-   CANVAS SIZE
+   CANVAS DIMENSIONS
 ================================== */
 
 function resizeDrawingCanvas() {
 
-    const rect = messagesStage.getBoundingClientRect();
+    const width = messages.clientWidth;
 
     const dpr = window.devicePixelRatio || 1;
 
-    drawingCanvas.width = Math.round(rect.width * dpr);
-    drawingCanvas.height = Math.round(rect.height * dpr);
+    const maxCanvasHeight = Math.floor(16000 / dpr);
+
+    const height = Math.min(
+        Math.max(messages.scrollHeight, messages.clientHeight),
+        maxCanvasHeight
+    );
+
+    drawingCanvas.style.width = width + 'px';
+    drawingCanvas.style.height = height + 'px';
+
+    drawingCanvas.width = Math.round(width * dpr);
+    drawingCanvas.height = Math.round(height * dpr);
 
     drawingCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -942,18 +958,19 @@ function resizeDrawingCanvas() {
 
 
 /* ==================================
-   DRAW A LINE
+   DRAW A SEGMENT
 ================================== */
 
 function drawSegment(segment) {
 
-    const rect = messagesStage.getBoundingClientRect();
+    const width = messages.clientWidth;
 
-    const x1 = Number(segment.x1) * rect.width;
-    const y1 = Number(segment.y1) * rect.height;
+    const x1 = Number(segment.x1) * width;
+    const x2 = Number(segment.x2) * width;
 
-    const x2 = Number(segment.x2) * rect.width;
-    const y2 = Number(segment.y2) * rect.height;
+    // Y coordinates are absolute chat-content positions
+    const y1 = Number(segment.y1);
+    const y2 = Number(segment.y2);
 
     drawingCtx.beginPath();
 
@@ -970,43 +987,51 @@ function drawSegment(segment) {
 
 
 /* ==================================
-   REDRAW EVERYTHING
+   REDRAW ALL STORED SEGMENTS
 ================================== */
 
 function redrawAllDrawings() {
 
-    const rect = messagesStage.getBoundingClientRect();
-
-    drawingCtx.clearRect(0, 0, rect.width, rect.height);
+    drawingCtx.clearRect(
+        0,
+        0,
+        drawingCanvas.width,
+        drawingCanvas.height
+    );
 
     drawingSegments.forEach(segment => {
         drawSegment(segment);
     });
+
 }
 
 
 /* ==================================
-   NORMALIZE COORDINATES
+   GET CHAT COORDINATES
 ================================== */
 
 function getDrawingPoint(event) {
 
-    const rect = messagesStage.getBoundingClientRect();
+    const rect = messages.getBoundingClientRect();
 
     return {
+
         x: Math.max(0, Math.min(1,
-            (event.clientX - rect.left) / rect.width
+            (event.clientX - rect.left) / messages.clientWidth
         )),
 
-        y: Math.max(0, Math.min(1,
-            (event.clientY - rect.top) / rect.height
-        ))
+        // Include scroll position!
+        y: Math.max(0,
+            event.clientY - rect.top + messages.scrollTop
+        )
+
     };
+
 }
 
 
 /* ==================================
-   SEND DRAWING TO SERVER
+   SEND SEGMENT TO DATABASE
 ================================== */
 
 function sendDrawingSegment(segment) {
@@ -1036,12 +1061,13 @@ function sendDrawingSegment(segment) {
         const result = await response.json();
 
         if (!result.success) {
-            throw new Error('Drawing was rejected');
+            throw new Error('Drawing rejected');
         }
 
     }).catch(error => {
         console.error('Drawing error:', error);
     });
+
 }
 
 
@@ -1063,11 +1089,15 @@ drawingCanvas.addEventListener('pointerdown', function(event) {
 
     // Draw a dot when starting a stroke
     const segment = {
+
         x1: previousPoint.x,
         y1: previousPoint.y,
+
         x2: previousPoint.x,
         y2: previousPoint.y,
+
         color: bubbleColorPicker.value
+
     };
 
     drawingSegments.push(segment);
@@ -1128,21 +1158,19 @@ function stopDrawing() {
 }
 
 drawingCanvas.addEventListener('pointerup', stopDrawing);
-
 drawingCanvas.addEventListener('pointercancel', stopDrawing);
-
 drawingCanvas.addEventListener('lostpointercapture', stopDrawing);
 
 
 /* ==================================
-   DRAWING MODE TOGGLE
+   DRAWING MODE
 ================================== */
 
 drawToggle.addEventListener('click', function() {
 
     drawingMode = !drawingMode;
 
-    messagesStage.classList.toggle(
+    messages.classList.toggle(
         'drawing-active',
         drawingMode
     );
@@ -1164,7 +1192,7 @@ drawToggle.addEventListener('click', function() {
 
 
 /* ==================================
-   FETCH OTHER USERS' DRAWINGS
+   FETCH SHARED DRAWINGS
 ================================== */
 
 async function loadDrawings() {
@@ -1183,18 +1211,22 @@ async function loadDrawings() {
 
         const data = await response.json();
 
-        data.forEach(segment => {
+        if (data.length) {
 
-            drawingSegments.push(segment);
+            data.forEach(segment => {
 
-            drawSegment(segment);
+                drawingSegments.push(segment);
 
-            lastDrawingId = Math.max(
-                lastDrawingId,
-                Number(segment.id)
-            );
+                lastDrawingId = Math.max(
+                    lastDrawingId,
+                    Number(segment.id)
+                );
 
-        });
+            });
+
+            resizeDrawingCanvas();
+
+        }
 
     } catch (error) {
 
@@ -1207,6 +1239,21 @@ async function loadDrawings() {
     }
 
 }
+
+
+/* ==================================
+   WATCH CHAT GROWTH
+================================== */
+
+// When messages arrive, extend the canvas
+const chatObserver = new MutationObserver(() => {
+    resizeDrawingCanvas();
+});
+
+chatObserver.observe(messages, {
+    childList: true,
+    subtree: true
+});
 
 
 /* ==================================
