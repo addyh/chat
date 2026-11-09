@@ -12,98 +12,98 @@ $page_status = "";
 include_once __DIR__ . '/config.php';
 
 try {
-    $pdo = new PDO(
-        "mysql:host=$db_host;dbname=$db_name;charset=utf8mb4",
-        $db_user,
-        $db_pass,
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-    );
+	$pdo = new PDO(
+		"mysql:host=$db_host;dbname=$db_name;charset=utf8mb4",
+		$db_user,
+		$db_pass,
+		[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+	);
 } catch (PDOException $e) {
-    die("Database connection failed.");
+	die("Database connection failed.");
 }
 
 /* CREATE MESSAGE TABLE */
 $pdo->exec("
 CREATE TABLE IF NOT EXISTS chat_messages (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    message TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    sender_id VARCHAR(64) NULL,
-    sender_color VARCHAR(7) NULL,
-    bubble_position ENUM('left', 'right') NULL
+	id INT AUTO_INCREMENT PRIMARY KEY,
+	message TEXT NOT NULL,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	sender_id VARCHAR(64) NULL,
+	sender_color VARCHAR(7) NULL,
+	bubble_position ENUM('left', 'right') NULL
 )
 ");
 
 /* CREATE USERS TABLE */
 $pdo->exec("
 CREATE TABLE IF NOT EXISTS chat_users (
-    sender_id VARCHAR(64) PRIMARY KEY,
-    last_seen TIMESTAMP NOT NULL
-    DEFAULT CURRENT_TIMESTAMP
+	sender_id VARCHAR(64) PRIMARY KEY,
+	last_seen TIMESTAMP NOT NULL
+	DEFAULT CURRENT_TIMESTAMP
 )
 ");
 
 /* SEND MESSAGE */
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
-    && ($_POST['action'] ?? '') === 'send') {
+	&& ($_POST['action'] ?? '') === 'send') {
 
-    header('Content-Type: application/json');
+	header('Content-Type: application/json');
 
-    $message = trim($_POST['message'] ?? '');
+	$message = trim($_POST['message'] ?? '');
 
-    // Read identity from browser cookies
-    $senderId = $_COOKIE['chat_id'] ?? '';
-    $senderColor = $_COOKIE['chat_color'] ?? '';
-    $bubblePosition = $_COOKIE['chat_position'] ?? '';
+	// Read identity from browser cookies
+	$senderId = $_COOKIE['chat_id'] ?? '';
+	$senderColor = $_COOKIE['chat_color'] ?? '';
+	$bubblePosition = $_COOKIE['chat_position'] ?? '';
 
-    if (
-        $message === '' ||
-        mb_strlen($message) > 5000 ||
-        !preg_match('/^[a-f0-9]{32}$/', $senderId) ||
-        !preg_match('/^#[a-fA-F0-9]{6}$/', $senderColor) ||
-        !preg_match('/^(right|left)$/', $bubblePosition)
-    ) {
-        echo json_encode(['success' => false]);
-        exit;
-    }
+	if (
+		$message === '' ||
+		mb_strlen($message) > 5000 ||
+		!preg_match('/^[a-f0-9]{32}$/', $senderId) ||
+		!preg_match('/^#[a-fA-F0-9]{6}$/', $senderColor) ||
+		!preg_match('/^(right|left)$/', $bubblePosition)
+	) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
 
-    $stmt = $pdo->prepare("
-        INSERT INTO chat_messages
-        (message, sender_id, sender_color, bubble_position)
-        VALUES (?, ?, ?, ?)
-    ");
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_messages
+		(message, sender_id, sender_color, bubble_position)
+		VALUES (?, ?, ?, ?)
+	");
 
-    $stmt->execute([
-        $message,
-        $senderId,
-        $senderColor,
-        $bubblePosition
-    ]);
+	$stmt->execute([
+		$message,
+		$senderId,
+		$senderColor,
+		$bubblePosition
+	]);
 
-    echo json_encode(['success' => true]);
-    exit;
+	echo json_encode(['success' => true]);
+	exit;
 }
 
 
 /* FETCH NEW MESSAGES */
 if (($_GET['action'] ?? '') === 'fetch') {
 
-    header('Content-Type: application/json');
+	header('Content-Type: application/json');
 
-    $after = max(0, (int)($_GET['after'] ?? 0));
+	$after = max(0, (int)($_GET['after'] ?? 0));
 
-    $stmt = $pdo->prepare("
-        SELECT id, message, created_at, sender_id, sender_color, bubble_position
-        FROM chat_messages
-        WHERE id > ?
-        ORDER BY id ASC
-        LIMIT 500
-    ");
+	$stmt = $pdo->prepare("
+		SELECT id, message, created_at, sender_id, sender_color, bubble_position
+		FROM chat_messages
+		WHERE id > ?
+		ORDER BY id ASC
+		LIMIT 500
+	");
 
-    $stmt->execute([$after]);
+	$stmt->execute([$after]);
 
-    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-    exit;
+	echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+	exit;
 }
 
 
@@ -111,45 +111,45 @@ if (($_GET['action'] ?? '') === 'fetch') {
 
 if (($_POST['action'] ?? '') === 'online') {
 
-    header('Content-Type: application/json');
+	header('Content-Type: application/json');
 
-    $senderId = $_COOKIE['chat_id'] ?? '';
+	$senderId = $_COOKIE['chat_id'] ?? '';
 
-    if (!preg_match('/^[a-f0-9]{32}$/', $senderId)) {
-        echo json_encode(['success' => false]);
-        exit;
-    }
+	if (!preg_match('/^[a-f0-9]{32}$/', $senderId)) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
 
-    // Update this visitor's last activity
-    $stmt = $pdo->prepare("
-        INSERT INTO chat_users (sender_id, last_seen)
-        VALUES (?, NOW())
-        ON DUPLICATE KEY UPDATE last_seen = NOW()
-    ");
+	// Update this visitor's last activity
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_users (sender_id, last_seen)
+		VALUES (?, NOW())
+		ON DUPLICATE KEY UPDATE last_seen = NOW()
+	");
 
-    $stmt->execute([$senderId]);
+	$stmt->execute([$senderId]);
 
-    // Count visitors active within the last few seconds
-    $count = $pdo->query("
-        SELECT COUNT(*)
-        FROM chat_users
-        WHERE last_seen >= NOW() - INTERVAL 3 SECOND
-    ")->fetchColumn();
+	// Count visitors active within the last few seconds
+	$count = $pdo->query("
+		SELECT COUNT(*)
+		FROM chat_users
+		WHERE last_seen >= NOW() - INTERVAL 3 SECOND
+	")->fetchColumn();
 
-    echo json_encode([
-        'success' => true,
-        'online' => (int)$count
-    ]);
+	echo json_encode([
+		'success' => true,
+		'online' => (int)$count
+	]);
 
-    exit;
+	exit;
 }
 
 
 /* LOAD ALL PREVIOUS MESSAGES */
 $initialMessages = $pdo->query("
-    SELECT id, message, created_at, sender_id, sender_color, bubble_position
-    FROM chat_messages
-    ORDER BY id ASC
+	SELECT id, message, created_at, sender_id, sender_color, bubble_position
+	FROM chat_messages
+	ORDER BY id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
@@ -163,156 +163,156 @@ $initialMessages = $pdo->query("
 
 <style>
 * {
-    box-sizing: border-box;
+	box-sizing: border-box;
 }
 
 body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #e9edf3;
+	margin: 0;
+	font-family: Arial, sans-serif;
+	background: #e9edf3;
 }
 
 .chat-container {
-    max-width: 750px;
-    height: 95vh;
-    margin: 2.5vh auto;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 20px #0001;
-    position: relative;
+	max-width: 750px;
+	height: 95vh;
+	margin: 2.5vh auto;
+	background: white;
+	display: flex;
+	flex-direction: column;
+	border-radius: 12px;
+	overflow: hidden;
+	box-shadow: 0 4px 20px #0001;
+	position: relative;
 }
 
 .header {
-    background: #2563eb;
-    color: white;
-    padding: 15px 20px;
+	background: #2563eb;
+	color: white;
+	padding: 15px 20px;
 }
 
 .header-content {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 15px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 15px;
 }
 
 .header-text h3 {
-    margin: 0;
+	margin: 0;
 }
 
 .status {
-    font-size: 12px;
-    margin-top: 6px;
-    opacity: .8;
+	font-size: 12px;
+	margin-top: 6px;
+	opacity: .8;
 }
 
 .online-count {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 7px;
-    font-size: 11px;
-    opacity: .9;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 7px;
+	font-size: 11px;
+	opacity: .9;
 }
 
 .online-indicator {
-    width: 7px;
-    height: 7px;
-    background: #4ade80;
-    border-radius: 50%;
-    box-shadow: 0 0 5px #4ade80;
+	width: 7px;
+	height: 7px;
+	background: #4ade80;
+	border-radius: 50%;
+	box-shadow: 0 0 5px #4ade80;
 }
 
 .color-picker-area {
-    display: flex;
-    align-items: center;
+	display: flex;
+	align-items: center;
 }
 
 .color-picker-area input {
-    width: 38px;
-    height: 30px;
-    padding: 0;
-    border: 2px solid white;
-    background: transparent;
-    cursor: pointer;
+	width: 38px;
+	height: 30px;
+	padding: 0;
+	border: 2px solid white;
+	background: transparent;
+	cursor: pointer;
 }
 
 .messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-    background: #f7f8fa;
-    overscroll-behavior: contain;
-    overflow-anchor: none;
+	flex: 1;
+	overflow-y: auto;
+	padding: 20px;
+	background: #f7f8fa;
+	overscroll-behavior: contain;
+	overflow-anchor: none;
 }
 
 .message {
-    width: fit-content;
-    max-width: 85%;
-    padding: 12px 16px;
-    margin-bottom: 12px;
-    border-radius: 12px;
-    overflow-wrap: anywhere;
-    box-shadow: 0 1px 3px #0001;
-    color: #222;
-    line-height: 1.4;
+	width: fit-content;
+	max-width: 85%;
+	padding: 12px 16px;
+	margin-bottom: 12px;
+	border-radius: 12px;
+	overflow-wrap: anywhere;
+	box-shadow: 0 1px 3px #0001;
+	color: #222;
+	line-height: 1.4;
 }
 
 .message.left {
-    margin-right: auto;
-    border-bottom-left-radius: 4px;
+	margin-right: auto;
+	border-bottom-left-radius: 4px;
 }
 
 .message.right {
-    margin-left: auto;
-    border-bottom-right-radius: 4px;
+	margin-left: auto;
+	border-bottom-right-radius: 4px;
 }
 
 .message small {
-    display: block;
-    font-size: 10px;
-    color: #555;
-    margin-top: 7px;
-    opacity: .7;
+	display: block;
+	font-size: 10px;
+	color: #555;
+	margin-top: 7px;
+	opacity: .7;
 }
 
 .input-area {
-    display: flex;
-    padding: 15px;
-    gap: 10px;
-    border-top: 1px solid #ddd;
-    background: white;
+	display: flex;
+	padding: 15px;
+	gap: 10px;
+	border-top: 1px solid #ddd;
+	background: white;
 }
 
 .input-area input {
-    flex: 1;
-    min-width: 0;
-    padding: 14px;
-    border: 1px solid #ddd;
-    border-radius: 25px;
-    font-size: 15px;
-    outline: none;
+	flex: 1;
+	min-width: 0;
+	padding: 14px;
+	border: 1px solid #ddd;
+	border-radius: 25px;
+	font-size: 15px;
+	outline: none;
 }
 
 .input-area input:focus {
-    border-color: #2563eb;
+	border-color: #2563eb;
 }
 
 .input-area button {
-    padding: 0 25px;
-    border-radius: 25px;
-    background: #2563eb;
-    color: white;
-    border: none;
-    font-size: 15px;
-    cursor: pointer;
+	padding: 0 25px;
+	border-radius: 25px;
+	background: #2563eb;
+	color: white;
+	border: none;
+	font-size: 15px;
+	cursor: pointer;
 }
 
 .input-area button:disabled {
-    opacity: .5;
-    cursor: wait;
+	opacity: .5;
+	cursor: wait;
 }
 
 
@@ -321,102 +321,102 @@ body {
 ================================= */
 
 .new-messages-button {
-    position: absolute;
-    right: 22px;
-    bottom: 95px;
+	position: absolute;
+	right: 22px;
+	bottom: 95px;
 
-    width: 46px;
-    height: 46px;
+	width: 46px;
+	height: 46px;
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 
-    border: none;
-    border-radius: 50%;
+	border: none;
+	border-radius: 50%;
 
-    background: #2563eb;
-    color: white;
+	background: #2563eb;
+	color: white;
 
-    box-shadow: 0 3px 12px #0003;
+	box-shadow: 0 3px 12px #0003;
 
-    cursor: pointer;
-    z-index: 10;
+	cursor: pointer;
+	z-index: 10;
 
-    transition:
-        opacity .2s ease,
-        transform .2s ease,
-        background .2s ease;
+	transition:
+		opacity .2s ease,
+		transform .2s ease,
+		background .2s ease;
 }
 
 .new-messages-button:hover {
-    background: #1d4ed8;
-    transform: translateY(-2px);
+	background: #1d4ed8;
+	transform: translateY(-2px);
 }
 
 .new-messages-button:active {
-    transform: scale(.92);
+	transform: scale(.92);
 }
 
 .new-messages-button svg {
-    width: 23px;
-    height: 23px;
-    stroke: currentColor;
-    stroke-width: 2.5;
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+	width: 23px;
+	height: 23px;
+	stroke: currentColor;
+	stroke-width: 2.5;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
 }
 
 /* Unread notification circle */
 
 .unread-count {
-    position: absolute;
-    top: -15px;
-    right: -8px;
+	position: absolute;
+	top: -15px;
+	right: -8px;
 
-    min-width: 30px;
-    height: 30px;
+	min-width: 30px;
+	height: 30px;
 
-    padding: 0 5px;
+	padding: 0 5px;
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 
-    border-radius: 20px;
+	border-radius: 20px;
 
-    background: #ef4444;
-    color: white;
+	background: #ef4444;
+	color: white;
 
-    border: 2px solid white;
+	border: 2px solid white;
 
-    font-size: 15px;
-    font-weight: bold;
-    line-height: 1;
+	font-size: 15px;
+	font-weight: bold;
+	line-height: 1;
 }
 
 /* Hide button when there are no unread messages */
 .unread-count[hidden] {
-    display: none;
+	display: none;
 }
 .new-messages-button[hidden] {
-    display: none;
+	display: none;
 }
 
 
 @media(max-width: 600px) {
 
-    .chat-container {
-        height: 100dvh;
-        margin: 0;
-        border-radius: 0;
-    }
+	.chat-container {
+		height: 100dvh;
+		margin: 0;
+		border-radius: 0;
+	}
 
-    .new-messages-button {
-        right: 18px;
-        bottom: 82px;
-    }
+	.new-messages-button {
+		right: 18px;
+		bottom: 82px;
+	}
 
 }
 </style>
@@ -426,73 +426,72 @@ body {
 
 <div class="chat-container">
 
-    <div class="header">
-        <div class="header-content">
-            <div class="header-text">
-                <h3><?= htmlspecialchars($page_header) ?></h3>
-                <div class="status"><?= htmlspecialchars($page_status) ?></div>
-                <div class="online-count">
-                    <span class="online-indicator"></span>
-                    <span id="onlineCount">online</span>
-                </div>
-            </div>
+	<div class="header">
+		<div class="header-content">
+			<div class="header-text">
+				<h3><?= htmlspecialchars($page_header) ?></h3>
+				<div class="status"><?= htmlspecialchars($page_status) ?></div>
+				<div class="online-count">
+					<span class="online-indicator"></span>
+					<span id="onlineCount">online</span>
+				</div>
+			</div>
 
-            <div class="color-picker-area">
-                <input type="color" id="bubbleColor" title="Change bubble color">
-            </div>
-        </div>
-    </div>
+			<div class="color-picker-area">
+				<input type="color" id="bubbleColor" title="Change bubble color">
+			</div>
+		</div>
+	</div>
 
-    <div class="messages" id="messages">
+	<div class="messages" id="messages">
 
-        <?php foreach ($initialMessages as $msg): ?>
+		<?php foreach ($initialMessages as $msg): ?>
 
-            <div
-                class="message"
-                data-id="<?= (int)$msg['id'] ?>"
-                data-sender-id="<?= htmlspecialchars($msg['sender_id'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-                data-color="<?= htmlspecialchars($msg['sender_color'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-                data-position="<?= htmlspecialchars($msg['bubble_position'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-            >
-                <div><?= nl2br(htmlspecialchars($msg['message'], ENT_QUOTES, 'UTF-8')) ?></div>
-                <small><?= htmlspecialchars($msg['created_at']) ?></small>
-            </div>
+			<div class="message"
+				data-id="<?= (int)$msg['id'] ?>"
+				data-sender-id="<?= htmlspecialchars($msg['sender_id'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+				data-color="<?= htmlspecialchars($msg['sender_color'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+				data-position="<?= htmlspecialchars($msg['bubble_position'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+			>
+				<div><?= nl2br(htmlspecialchars($msg['message'], ENT_QUOTES, 'UTF-8')) ?></div>
+				<small><?= htmlspecialchars($msg['created_at']) ?></small>
+			</div>
 
-        <?php endforeach; ?>
+		<?php endforeach; ?>
 
-    </div>
+	</div>
 
-    <!-- NEW MESSAGE BUTTON -->
+	<!-- NEW MESSAGE BUTTON -->
 
-    <button
-        type="button"
-        class="new-messages-button"
-        id="newMessagesButton"
-        aria-label="Scroll to latest messages"
-        title="Scroll to latest messages"
-        hidden
-    >
+	<button
+		type="button"
+		class="new-messages-button"
+		id="newMessagesButton"
+		aria-label="Scroll to latest messages"
+		title="Scroll to latest messages"
+		hidden
+	>
 
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 5v14"></path>
-            <path d="m19 12-7 7-7-7"></path>
-        </svg>
+		<svg viewBox="0 0 24 24" aria-hidden="true">
+			<path d="M12 5v14"></path>
+			<path d="m19 12-7 7-7-7"></path>
+		</svg>
 
-        <span class="unread-count" id="unreadCount">0</span>
+		<span class="unread-count" id="unreadCount">0</span>
 
-    </button>
+	</button>
 
-    <form class="input-area" id="chatForm">
-        <input
-            type="text"
-            id="message"
-            placeholder="Write a message..."
-            autocomplete="off"
-            maxlength="5000"
-            required
-        >
-        <button type="submit" id="sendButton">Send</button>
-    </form>
+	<form class="input-area" id="chatForm">
+		<input
+			type="text"
+			id="message"
+			placeholder="Write a message..."
+			autocomplete="off"
+			maxlength="5000"
+			required
+		>
+		<button type="submit" id="sendButton">Send</button>
+	</form>
 
 </div>
 
@@ -509,22 +508,22 @@ const unreadCountDisplay = document.getElementById('unreadCount');
 /* COOKIE HELPERS */
 
 function getCookie(name) {
-    const match = document.cookie.match(
-        new RegExp('(?:^|; )' + name + '=([^;]*)')
-    );
+	const match = document.cookie.match(
+		new RegExp('(?:^|; )' + name + '=([^;]*)')
+	);
 
-    return match ? decodeURIComponent(match[1]) : null;
+	return match ? decodeURIComponent(match[1]) : null;
 }
 
 function setCookie(name, value) {
-    let cookie = name + '=' + encodeURIComponent(value) +
-        '; max-age=315360000; path=/; SameSite=Lax';
+	let cookie = name + '=' + encodeURIComponent(value) +
+		'; max-age=315360000; path=/; SameSite=Lax';
 
-    if (location.protocol === 'https:') {
-        cookie += '; Secure';
-    }
+	if (location.protocol === 'https:') {
+		cookie += '; Secure';
+	}
 
-    document.cookie = cookie;
+	document.cookie = cookie;
 }
 
 
@@ -533,8 +532,8 @@ function setCookie(name, value) {
 let senderId = getCookie('chat_id');
 
 if (!senderId || !/^[a-f0-9]{32}$/.test(senderId)) {
-    senderId = crypto.randomUUID().replace(/-/g, '');
-    setCookie('chat_id', senderId);
+	senderId = crypto.randomUUID().replace(/-/g, '');
+	setCookie('chat_id', senderId);
 }
 
 /* SET RIGHT BUBBLE POSITION */
@@ -542,26 +541,26 @@ if (!senderId || !/^[a-f0-9]{32}$/.test(senderId)) {
 let bubblePosition = getCookie('chat_position');
 
 if (!bubblePosition || !/^(left|right)$/.test(bubblePosition)) {
-    bubblePosition = 'right';
-    setCookie('chat_position', bubblePosition);
+	bubblePosition = 'right';
+	setCookie('chat_position', bubblePosition);
 }
 
 
 /* GENERATE RANDOM PASTEL COLOR */
 
 function randomColor() {
-    const channel = () => Math.floor(160 + Math.random() * 96)
-        .toString(16)
-        .padStart(2, '0');
+	const channel = () => Math.floor(160 + Math.random() * 96)
+		.toString(16)
+		.padStart(2, '0');
 
-    return '#' + channel() + channel() + channel();
+	return '#' + channel() + channel() + channel();
 }
 
 let senderColor = getCookie('chat_color');
 
 if (!senderColor || !/^#[a-fA-F0-9]{6}$/.test(senderColor)) {
-    senderColor = randomColor();
-    setCookie('chat_color', senderColor);
+	senderColor = randomColor();
+	setCookie('chat_color', senderColor);
 }
 
 /* BUBBLE COLOR PICKER */
@@ -570,17 +569,17 @@ bubbleColorPicker.value = senderColor;
 
 bubbleColorPicker.addEventListener('input', function() {
 
-    senderColor = this.value;
+	senderColor = this.value;
 
-    // Save selected color
-    setCookie('chat_color', senderColor);
+	// Save selected color
+	setCookie('chat_color', senderColor);
 
-    // Update existing messages belonging to this browser
-    // document.querySelectorAll('.message').forEach(div => {
-    //     if (div.dataset.senderId === senderId) {
-    //         div.style.backgroundColor = senderColor;
-    //     }
-    // });
+	// Update existing messages belonging to this browser
+	// document.querySelectorAll('.message').forEach(div => {
+	//     if (div.dataset.senderId === senderId) {
+	//         div.style.backgroundColor = senderColor;
+	//     }
+	// });
 
 });
 
@@ -588,8 +587,8 @@ bubbleColorPicker.addEventListener('input', function() {
 /* CHAT IDENTITY */
 
 let lastId = <?= !empty($initialMessages)
-    ? (int)end($initialMessages)['id']
-    : 0 ?>;
+	? (int)end($initialMessages)['id']
+	: 0 ?>;
 
 let loading = false;
 
@@ -617,11 +616,11 @@ let unreadMessages = 0;
 
 function isAtBottom() {
 
-    return (
-        messages.scrollHeight -
-        messages.scrollTop -
-        messages.clientHeight
-    ) <= BOTTOM_THRESHOLD;
+	return (
+		messages.scrollHeight -
+		messages.scrollTop -
+		messages.clientHeight
+	) <= BOTTOM_THRESHOLD;
 
 }
 
@@ -630,7 +629,7 @@ function isAtBottom() {
 
 function scrollToBottom() {
 
-    messages.scrollTop = messages.scrollHeight;
+	messages.scrollTop = messages.scrollHeight;
 
 }
 
@@ -639,15 +638,14 @@ function scrollToBottom() {
 
 function updateUnreadIndicator() {
 
-    // Show arrow whenever not at bottom
-    newMessagesButton.hidden = isAtBottom();
+	// Show arrow whenever not at bottom
+	newMessagesButton.hidden = isAtBottom();
 
-    // Update notification number
-    unreadCountDisplay.textContent =
-        unreadMessages > 99 ? '99+' : unreadMessages;
+	// Update notification number
+	unreadCountDisplay.textContent = unreadMessages;
 
-    // Hide red circle when count is zero
-    unreadCountDisplay.hidden = unreadMessages === 0;
+	// Hide red circle when count is zero
+	unreadCountDisplay.hidden = unreadMessages === 0;
 
 }
 
@@ -656,9 +654,9 @@ function updateUnreadIndicator() {
 
 function clearUnreadMessages() {
 
-    unreadMessages = 0;
+	unreadMessages = 0;
 
-    updateUnreadIndicator();
+	updateUnreadIndicator();
 
 }
 
@@ -667,9 +665,9 @@ function clearUnreadMessages() {
 
 newMessagesButton.addEventListener('click', function() {
 
-    scrollToBottom();
+	scrollToBottom();
 
-    clearUnreadMessages();
+	clearUnreadMessages();
 
 });
 
@@ -678,15 +676,15 @@ newMessagesButton.addEventListener('click', function() {
 
 messages.addEventListener('scroll', function() {
 
-    if (isAtBottom()) {
+	if (isAtBottom()) {
 
-        clearUnreadMessages();
+		clearUnreadMessages();
 
-    } else {
+	} else {
 
-        updateUnreadIndicator();
+		updateUnreadIndicator();
 
-    }
+	}
 
 });
 
@@ -697,44 +695,44 @@ messages.addEventListener('scroll', function() {
 
 function styleMessage(div, senderId, color, position) {
 
-    div.classList.remove('left', 'right');
+	div.classList.remove('left', 'right');
 
-    div.classList.add(
-        position == 'left' ? 'left' : 'right'
-    );
+	div.classList.add(
+		position == 'left' ? 'left' : 'right'
+	);
 
-    if (/^#[a-fA-F0-9]{6}$/.test(color || '')) {
-        div.style.backgroundColor = color;
-    }
+	if (/^#[a-fA-F0-9]{6}$/.test(color || '')) {
+		div.style.backgroundColor = color;
+	}
 }
 
 const existingMessages = messages.querySelectorAll('.message');
 
 existingMessages.forEach(div => {
-    if (div.dataset.senderId) {
-        styleMessage(
-            div,
-            div.dataset.senderId,
-            div.dataset.color,
-            div.dataset.position
-        );
-    } else {
-        // Older messages created before cookie identities
-        div.classList.add('left');
-    }
+	if (div.dataset.senderId) {
+		styleMessage(
+			div,
+			div.dataset.senderId,
+			div.dataset.color,
+			div.dataset.position
+		);
+	} else {
+		// Older messages created before cookie identities
+		div.classList.add('left');
+	}
 });
 
 
 /* ESCAPE HTML */
 
 function escapeHTML(str) {
-    return String(str).replace(/[&<>"']/g, char => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    })[char]);
+	return String(str).replace(/[&<>"']/g, char => ({
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		"'": '&#039;'
+	})[char]);
 }
 
 
@@ -744,120 +742,120 @@ function escapeHTML(str) {
 
 async function loadMessages() {
 
-    if (loading) return;
+	if (loading) return;
 
-    loading = true;
+	loading = true;
 
-    try {
+	try {
 
-        const response = await fetch(
-            '?action=fetch&after=' + lastId
-        );
+		const response = await fetch(
+			'?action=fetch&after=' + lastId
+		);
 
-        if (!response.ok) return;
+		if (!response.ok) return;
 
-        const data = await response.json();
+		const data = await response.json();
 
-        if (data.length) {
+		if (data.length) {
 
-            /*
-               IMPORTANT:
+			/*
+			   IMPORTANT:
 
-               Check the scroll position BEFORE
-               adding the new messages.
-            */
+			   Check the scroll position BEFORE
+			   adding the new messages.
+			*/
 
-            const wasAtBottom = isAtBottom();
+			const wasAtBottom = isAtBottom();
 
-            /*
-               Remember the current position
-               so we can preserve it if needed.
-            */
+			/*
+			   Remember the current position
+			   so we can preserve it if needed.
+			*/
 
-            const previousScrollTop = messages.scrollTop;
-
-
-            /* APPEND NEW MESSAGES */
-
-            data.forEach(msg => {
-
-                const div = document.createElement('div');
-
-                div.className = 'message';
-
-                div.dataset.id = msg.id;
-                div.dataset.senderId = msg.sender_id || '';
-                div.dataset.color = msg.sender_color || '';
-                div.dataset.position = msg.bubble_position || '';
-
-                div.innerHTML =
-                    '<div>' +
-                    escapeHTML(msg.message).replace(/\n/g, '<br>') +
-                    '</div>' +
-                    '<small>' +
-                    escapeHTML(msg.created_at) +
-                    '</small>';
-
-                if (msg.sender_id) {
-
-                    styleMessage(
-                        div,
-                        msg.sender_id,
-                        msg.sender_color,
-                        msg.bubble_position
-                    );
-
-                }
-
-                messages.appendChild(div);
-
-                lastId = Math.max(lastId, Number(msg.id));
-
-            });
+			const previousScrollTop = messages.scrollTop;
 
 
-            /*
-               SMART SCROLLING:
+			/* APPEND NEW MESSAGES */
 
-               If already at bottom:
-               Automatically follow the newest message.
+			data.forEach(msg => {
 
-               If NOT at bottom:
-               Preserve the current scroll position
-               and increment the unread counter.
-            */
+				const div = document.createElement('div');
 
-            if (wasAtBottom) {
+				div.className = 'message';
 
-                scrollToBottom();
+				div.dataset.id = msg.id;
+				div.dataset.senderId = msg.sender_id || '';
+				div.dataset.color = msg.sender_color || '';
+				div.dataset.position = msg.bubble_position || '';
 
-                clearUnreadMessages();
+				div.innerHTML =
+					'<div>' +
+					escapeHTML(msg.message).replace(/\n/g, '<br>') +
+					'</div>' +
+					'<small>' +
+					escapeHTML(msg.created_at) +
+					'</small>';
 
-            } else {
+				if (msg.sender_id) {
 
-                // Preserve current scroll position
-                messages.scrollTop = previousScrollTop;
+					styleMessage(
+						div,
+						msg.sender_id,
+						msg.sender_color,
+						msg.bubble_position
+					);
 
-                // Only count messages sent by OTHER people
-                const incomingMessages = data.filter(msg =>
-                    msg.sender_id !== senderId
-                );
+				}
 
-                unreadMessages += incomingMessages.length;
+				messages.appendChild(div);
 
-                // Keep button visible even when unread count is zero
-                updateUnreadIndicator();
+				lastId = Math.max(lastId, Number(msg.id));
 
-            }
+			});
 
-        }
 
-    } catch (error) {
-        console.error('Chat update failed', error);
+			/*
+			   SMART SCROLLING:
 
-    } finally {
-        loading = false;
-    }
+			   If already at bottom:
+			   Automatically follow the newest message.
+
+			   If NOT at bottom:
+			   Preserve the current scroll position
+			   and increment the unread counter.
+			*/
+
+			if (wasAtBottom) {
+
+				scrollToBottom();
+
+				clearUnreadMessages();
+
+			} else {
+
+				// Preserve current scroll position
+				messages.scrollTop = previousScrollTop;
+
+				// Only count messages sent by OTHER people
+				const incomingMessages = data.filter(msg =>
+					msg.sender_id !== senderId
+				);
+
+				unreadMessages += incomingMessages.length;
+
+				// Keep button visible even when unread count is zero
+				updateUnreadIndicator();
+
+			}
+
+		}
+
+	} catch (error) {
+		console.error('Chat update failed', error);
+
+	} finally {
+		loading = false;
+	}
 }
 
 
@@ -865,68 +863,68 @@ async function loadMessages() {
 
 chatForm.addEventListener('submit', async function(e) {
 
-    e.preventDefault();
+	e.preventDefault();
 
-    const text = messageInput.value.trim();
+	const text = messageInput.value.trim();
 
-    if (!text) return;
+	if (!text) return;
 
-    // CHAT COMMANDS
-    if (text.toLowerCase() === '/left') {
+	// CHAT COMMANDS
+	if (text.toLowerCase() === '/left') {
 
-        bubblePosition = 'left';
-        setCookie('chat_position', 'left');
+		bubblePosition = 'left';
+		setCookie('chat_position', 'left');
 
-        messageInput.value = '';
-        messageInput.focus();
+		messageInput.value = '';
+		messageInput.focus();
 
-        return;
-    }
+		return;
+	}
 
-    if (text.toLowerCase() === '/right') {
+	if (text.toLowerCase() === '/right') {
 
-        bubblePosition = 'right';
-        setCookie('chat_position', 'right');
+		bubblePosition = 'right';
+		setCookie('chat_position', 'right');
 
-        messageInput.value = '';
-        messageInput.focus();
+		messageInput.value = '';
+		messageInput.focus();
 
-        return;
-    }
+		return;
+	}
 
-    sendButton.disabled = true;
+	sendButton.disabled = true;
 
-    const formData = new FormData();
+	const formData = new FormData();
 
-    formData.append('action', 'send');
-    formData.append('message', text);
+	formData.append('action', 'send');
+	formData.append('message', text);
 
-    try {
+	try {
 
-        const response = await fetch('', {
-            method: 'POST',
-            body: formData
-        });
+		const response = await fetch('', {
+			method: 'POST',
+			body: formData
+		});
 
-        const result = await response.json();
+		const result = await response.json();
 
-        if (result.success) {
+		if (result.success) {
 
-            messageInput.value = '';
+			messageInput.value = '';
 
-            await loadMessages();
+			await loadMessages();
 
-        } else {
-            alert('Unable to send message.');
-        }
+		} else {
+			alert('Unable to send message.');
+		}
 
-    } catch (error) {
-        alert('Unable to send message.');
+	} catch (error) {
+		alert('Unable to send message.');
 
-    } finally {
-        sendButton.disabled = false;
-        messageInput.focus();
-    }
+	} finally {
+		sendButton.disabled = false;
+		messageInput.focus();
+	}
 });
 
 
@@ -944,28 +942,28 @@ scrollToBottom();
 
 async function updateOnlineCount() {
 
-    try {
+	try {
 
-        const formData = new FormData();
-        formData.append('action', 'online');
+		const formData = new FormData();
+		formData.append('action', 'online');
 
-        const response = await fetch('', {
-            method: 'POST',
-            body: formData
-        });
+		const response = await fetch('', {
+			method: 'POST',
+			body: formData
+		});
 
-        if (!response.ok) return;
+		if (!response.ok) return;
 
-        const data = await response.json();
+		const data = await response.json();
 
-        if (data.success) {
-            document.getElementById('onlineCount').textContent =
-                data.online + ' online';
-        }
+		if (data.success) {
+			document.getElementById('onlineCount').textContent =
+				data.online + ' online';
+		}
 
-    } catch (error) {
-        console.error('Online counter failed:', error);
-    }
+	} catch (error) {
+		console.error('Online counter failed:', error);
+	}
 }
 
 // Update immediately
