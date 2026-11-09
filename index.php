@@ -146,9 +146,21 @@ if (($_POST['action'] ?? '') === 'online') {
 
 
 /* LOAD ALL PREVIOUS MESSAGES */
+// $initialMessages = $pdo->query("
+// 	SELECT id, message, created_at, sender_id, sender_color, bubble_position
+// 	FROM chat_messages
+// 	ORDER BY id ASC
+// ")->fetchAll(PDO::FETCH_ASSOC);
+
+/* LOAD LATEST MESSAGES ONLY */
 $initialMessages = $pdo->query("
 	SELECT id, message, created_at, sender_id, sender_color, bubble_position
-	FROM chat_messages
+	FROM (
+		SELECT id, message, created_at, sender_id, sender_color, bubble_position
+		FROM chat_messages
+		ORDER BY id DESC
+		LIMIT 4600
+	) AS recent_messages
 	ORDER BY id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
