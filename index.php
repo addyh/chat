@@ -1,4 +1,3 @@
-
 <?php
 session_start();
 
@@ -28,40 +27,21 @@ $pdo->exec("
 CREATE TABLE IF NOT EXISTS chat_messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     message TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sender_id VARCHAR(64) NULL,
+    sender_color VARCHAR(7) NULL,
+    bubble_position ENUM('left', 'right') NULL
 )
 ");
 
 /* CREATE USERS TABLE */
 $pdo->exec("
-    CREATE TABLE IF NOT EXISTS chat_users (
-        sender_id VARCHAR(64) PRIMARY KEY,
-        last_seen TIMESTAMP NOT NULL
-        DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS chat_users (
+    sender_id VARCHAR(64) PRIMARY KEY,
+    last_seen TIMESTAMP NOT NULL
+    DEFAULT CURRENT_TIMESTAMP
+)
 ");
-
-/* ADD SENDER ID AND COLOR AND POSITION TO EXISTING TABLE */
-try {
-    $pdo->exec("
-        ALTER TABLE chat_messages
-        ADD COLUMN sender_id VARCHAR(64) NULL
-    ");
-} catch (PDOException $e) {}
-
-try {
-    $pdo->exec("
-        ALTER TABLE chat_messages
-        ADD COLUMN sender_color VARCHAR(7) NULL
-    ");
-} catch (PDOException $e) {}
-
-try {
-    $pdo->exec("
-        ALTER TABLE chat_messages
-        ADD COLUMN bubble_position ENUM('left', 'right') NULL
-    ");
-} catch (PDOException $e) {}
 
 /* SEND MESSAGE */
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
@@ -164,6 +144,7 @@ if (($_POST['action'] ?? '') === 'online') {
     exit;
 }
 
+
 /* LOAD ALL PREVIOUS MESSAGES */
 $initialMessages = $pdo->query("
     SELECT id, message, created_at, sender_id, sender_color, bubble_position
@@ -201,6 +182,7 @@ body {
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 4px 20px #0001;
+    position: relative;
 }
 
 .header {
@@ -262,6 +244,8 @@ body {
     overflow-y: auto;
     padding: 20px;
     background: #f7f8fa;
+    overscroll-behavior: contain;
+    overflow-anchor: none;
 }
 
 .message {
@@ -331,12 +315,109 @@ body {
     cursor: wait;
 }
 
+
+/* =================================
+   NEW MESSAGE SCROLL BUTTON
+================================= */
+
+.new-messages-button {
+    position: absolute;
+    right: 22px;
+    bottom: 95px;
+
+    width: 46px;
+    height: 46px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border: none;
+    border-radius: 50%;
+
+    background: #2563eb;
+    color: white;
+
+    box-shadow: 0 3px 12px #0003;
+
+    cursor: pointer;
+    z-index: 10;
+
+    transition:
+        opacity .2s ease,
+        transform .2s ease,
+        background .2s ease;
+}
+
+.new-messages-button:hover {
+    background: #1d4ed8;
+    transform: translateY(-2px);
+}
+
+.new-messages-button:active {
+    transform: scale(.92);
+}
+
+.new-messages-button svg {
+    width: 23px;
+    height: 23px;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Unread notification circle */
+
+.unread-count {
+    position: absolute;
+    top: -15px;
+    right: -8px;
+
+    min-width: 30px;
+    height: 30px;
+
+    padding: 0 5px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 20px;
+
+    background: #ef4444;
+    color: white;
+
+    border: 2px solid white;
+
+    font-size: 15px;
+    font-weight: bold;
+    line-height: 1;
+}
+
+/* Hide button when there are no unread messages */
+.unread-count[hidden] {
+    display: none;
+}
+.new-messages-button[hidden] {
+    display: none;
+}
+
+
 @media(max-width: 600px) {
+
     .chat-container {
         height: 100dvh;
         margin: 0;
         border-radius: 0;
     }
+
+    .new-messages-button {
+        right: 18px;
+        bottom: 82px;
+    }
+
 }
 </style>
 </head>
@@ -381,6 +462,26 @@ body {
 
     </div>
 
+    <!-- NEW MESSAGE BUTTON -->
+
+    <button
+        type="button"
+        class="new-messages-button"
+        id="newMessagesButton"
+        aria-label="Scroll to latest messages"
+        title="Scroll to latest messages"
+        hidden
+    >
+
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14"></path>
+            <path d="m19 12-7 7-7-7"></path>
+        </svg>
+
+        <span class="unread-count" id="unreadCount">0</span>
+
+    </button>
+
     <form class="input-area" id="chatForm">
         <input
             type="text"
@@ -401,6 +502,9 @@ const messageInput = document.getElementById('message');
 const chatForm = document.getElementById('chatForm');
 const sendButton = document.getElementById('sendButton');
 const bubbleColorPicker = document.getElementById('bubbleColor');
+const newMessagesButton = document.getElementById('newMessagesButton');
+const unreadCountDisplay = document.getElementById('unreadCount');
+
 
 /* COOKIE HELPERS */
 
@@ -490,9 +594,106 @@ let lastId = <?= !empty($initialMessages)
 let loading = false;
 
 
+/* =================================
+   SMART SCROLLING SYSTEM
+================================= */
+
+/*
+   Distance from the bottom that still
+   counts as being at the bottom.
+*/
+
+const BOTTOM_THRESHOLD = 32;
+
+/*
+   Number of new messages received
+   while the user is away from bottom.
+*/
+
+let unreadMessages = 0;
 
 
-/* STYLE EXISTING MESSAGES */
+/* CHECK WHETHER USER IS AT BOTTOM */
+
+function isAtBottom() {
+
+    return (
+        messages.scrollHeight -
+        messages.scrollTop -
+        messages.clientHeight
+    ) <= BOTTOM_THRESHOLD;
+
+}
+
+
+/* SCROLL TO BOTTOM */
+
+function scrollToBottom() {
+
+    messages.scrollTop = messages.scrollHeight;
+
+}
+
+
+/* UPDATE UNREAD MESSAGE INDICATOR */
+
+function updateUnreadIndicator() {
+
+    // Show arrow whenever not at bottom
+    newMessagesButton.hidden = isAtBottom();
+
+    // Update notification number
+    unreadCountDisplay.textContent =
+        unreadMessages > 99 ? '99+' : unreadMessages;
+
+    // Hide red circle when count is zero
+    unreadCountDisplay.hidden = unreadMessages === 0;
+
+}
+
+
+/* CLEAR UNREAD MESSAGES */
+
+function clearUnreadMessages() {
+
+    unreadMessages = 0;
+
+    updateUnreadIndicator();
+
+}
+
+
+/* SCROLL BUTTON CLICK */
+
+newMessagesButton.addEventListener('click', function() {
+
+    scrollToBottom();
+
+    clearUnreadMessages();
+
+});
+
+
+/* DETECT MANUAL SCROLLING */
+
+messages.addEventListener('scroll', function() {
+
+    if (isAtBottom()) {
+
+        clearUnreadMessages();
+
+    } else {
+
+        updateUnreadIndicator();
+
+    }
+
+});
+
+
+/* =================================
+   STYLE EXISTING MESSAGES
+================================= */
 
 function styleMessage(div, senderId, color, position) {
 
@@ -537,7 +738,9 @@ function escapeHTML(str) {
 }
 
 
-/* LOAD NEW MESSAGES */
+/* =================================
+   LOAD NEW MESSAGES
+================================= */
 
 async function loadMessages() {
 
@@ -555,40 +758,98 @@ async function loadMessages() {
 
         const data = await response.json();
 
-        data.forEach(msg => {
+        if (data.length) {
 
-            const div = document.createElement('div');
+            /*
+               IMPORTANT:
 
-            div.className = 'message';
-            div.dataset.id = msg.id;
-            div.dataset.senderId = msg.sender_id || '';
-            div.dataset.color = msg.sender_color || '';
-            div.dataset.position = msg.bubble_position || '';
+               Check the scroll position BEFORE
+               adding the new messages.
+            */
 
-            div.innerHTML =
-                '<div>' +
-                escapeHTML(msg.message).replace(/\n/g, '<br>') +
-                '</div>' +
-                '<small>' +
-                escapeHTML(msg.created_at) +
-                '</small>';
+            const wasAtBottom = isAtBottom();
 
-            if (msg.sender_id) {
-                styleMessage(
-                    div,
-                    msg.sender_id,
-                    msg.sender_color,
-                    msg.bubble_position
+            /*
+               Remember the current position
+               so we can preserve it if needed.
+            */
+
+            const previousScrollTop = messages.scrollTop;
+
+
+            /* APPEND NEW MESSAGES */
+
+            data.forEach(msg => {
+
+                const div = document.createElement('div');
+
+                div.className = 'message';
+
+                div.dataset.id = msg.id;
+                div.dataset.senderId = msg.sender_id || '';
+                div.dataset.color = msg.sender_color || '';
+                div.dataset.position = msg.bubble_position || '';
+
+                div.innerHTML =
+                    '<div>' +
+                    escapeHTML(msg.message).replace(/\n/g, '<br>') +
+                    '</div>' +
+                    '<small>' +
+                    escapeHTML(msg.created_at) +
+                    '</small>';
+
+                if (msg.sender_id) {
+
+                    styleMessage(
+                        div,
+                        msg.sender_id,
+                        msg.sender_color,
+                        msg.bubble_position
+                    );
+
+                }
+
+                messages.appendChild(div);
+
+                lastId = Math.max(lastId, Number(msg.id));
+
+            });
+
+
+            /*
+               SMART SCROLLING:
+
+               If already at bottom:
+               Automatically follow the newest message.
+
+               If NOT at bottom:
+               Preserve the current scroll position
+               and increment the unread counter.
+            */
+
+            if (wasAtBottom) {
+
+                scrollToBottom();
+
+                clearUnreadMessages();
+
+            } else {
+
+                // Preserve current scroll position
+                messages.scrollTop = previousScrollTop;
+
+                // Only count messages sent by OTHER people
+                const incomingMessages = data.filter(msg =>
+                    msg.sender_id !== senderId
                 );
+
+                unreadMessages += incomingMessages.length;
+
+                // Keep button visible even when unread count is zero
+                updateUnreadIndicator();
+
             }
 
-            messages.appendChild(div);
-
-            lastId = Math.max(lastId, Number(msg.id));
-        });
-
-        if (data.length) {
-            messages.scrollTop = messages.scrollHeight;
         }
 
     } catch (error) {
@@ -655,8 +916,6 @@ chatForm.addEventListener('submit', async function(e) {
 
             await loadMessages();
 
-            messages.scrollTop = messages.scrollHeight;
-
         } else {
             alert('Unable to send message.');
         }
@@ -678,8 +937,7 @@ setInterval(loadMessages, 1000);
 
 /* SCROLL TO LATEST MESSAGE ON OPEN */
 
-messages.scrollTop = messages.scrollHeight;
-
+scrollToBottom();
 
 
 /* ONLINE USERS COUNTER */
@@ -702,7 +960,7 @@ async function updateOnlineCount() {
 
         if (data.success) {
             document.getElementById('onlineCount').textContent =
-                data.online + (data.online === 1 ? ' online' : ' online');
+                data.online + ' online';
         }
 
     } catch (error) {
@@ -713,7 +971,7 @@ async function updateOnlineCount() {
 // Update immediately
 updateOnlineCount();
 
-// Update every 10 seconds
+// Update every 2 seconds
 setInterval(updateOnlineCount, 2000);
 
 </script>
