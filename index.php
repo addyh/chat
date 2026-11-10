@@ -1015,6 +1015,58 @@ function setCookie(name, value) {
 	document.cookie = cookie;
 }
 
+/* =================================
+   BEEP NOTIFICATIONS
+================================= */
+
+let beepAudioContext = null;
+
+function isBeepEnabled() {
+	return getCookie('beep') == '1';
+}
+
+function playBeep() {
+
+	if (!isBeepEnabled()) return;
+
+	try {
+
+		if (!beepAudioContext) {
+			beepAudioContext = new (
+				window.AudioContext ||
+				window.webkitAudioContext
+			)();
+		}
+
+		if (beepAudioContext.state === 'suspended') {
+			beepAudioContext.resume();
+		}
+
+		const oscillator = beepAudioContext.createOscillator();
+		const gain = beepAudioContext.createGain();
+
+		oscillator.type = 'sine';
+		oscillator.frequency.value = 1000;
+
+		gain.gain.setValueAtTime(0.5, beepAudioContext.currentTime);
+		gain.gain.setValueAtTime(0.5, beepAudioContext.currentTime + 0.4);
+		gain.gain.exponentialRampToValueAtTime(
+			0.001,
+			beepAudioContext.currentTime + 0.5
+		);
+
+		oscillator.connect(gain);
+		gain.connect(beepAudioContext.destination);
+
+		oscillator.start();
+		oscillator.stop(beepAudioContext.currentTime + 0.5);
+
+	} catch (error) {
+		console.error('Beep notification failed:', error);
+	}
+
+}
+
 
 /* GENERATE RANDOM BROWSER ID */
 
@@ -1712,81 +1764,83 @@ async function loadMessages() {
 			data.forEach(msg => {
 
 				const div = document.createElement('div');
+				div.className = 'message';
+				div.dataset.id = msg.id;
+				div.dataset.senderId = msg.sender_id || '';
+				div.dataset.color = msg.sender_color || '';
+				div.dataset.position = msg.bubble_position || '';
+				div.dataset.replyTo = msg.reply_to_id || '0';
 
-					div.className = 'message';
+				// Play notification only for messages from other people
+				if (msg.sender_id !== senderId) {
+					playBeep();
+				}
 
-					div.dataset.id = msg.id;
-					div.dataset.senderId = msg.sender_id || '';
-					div.dataset.color = msg.sender_color || '';
-					div.dataset.position = msg.bubble_position || '';
-					div.dataset.replyTo = msg.reply_to_id || '0';
+				/* REPLY PREVIEW */
 
+				if (msg.reply_to_id && msg.reply_message !== null) {
 
-					/* REPLY PREVIEW */
+					const reply = document.createElement('div');
 
-					if (msg.reply_to_id && msg.reply_message !== null) {
+					reply.className = 'message-reply';
 
-						const reply = document.createElement('div');
+					reply.dataset.replyTarget = msg.reply_to_id;
 
-						reply.className = 'message-reply';
+					const replyTitle = document.createElement('strong');
 
-						reply.dataset.replyTarget = msg.reply_to_id;
+					replyTitle.textContent =
+						msg.reply_sender_id === senderId
+						? 'Replying to yourself'
+						: 'Replying to message';
 
-						const replyTitle = document.createElement('strong');
+					const replyText = document.createElement('span');
 
-						replyTitle.textContent =
-							msg.reply_sender_id === senderId
-							? 'Replying to yourself'
-							: 'Replying to message';
+					replyText.textContent = msg.reply_message;
 
-						const replyText = document.createElement('span');
+					reply.appendChild(replyTitle);
+					reply.appendChild(replyText);
 
-						replyText.textContent = msg.reply_message;
+					div.appendChild(reply);
 
-						reply.appendChild(replyTitle);
-						reply.appendChild(replyText);
-
-						div.appendChild(reply);
-
-					}
-
-
-					/* MESSAGE BODY */
-
-					const body = document.createElement('div');
-
-					body.className = 'message-body';
-
-					body.innerHTML = parseLinks(msg.message);
-
-					div.appendChild(body);
+				}
 
 
-					/* TIMESTAMP */
+				/* MESSAGE BODY */
 
-					const timestamp = document.createElement('small');
+				const body = document.createElement('div');
 
-					timestamp.textContent = msg.created_at;
+				body.className = 'message-body';
 
-					div.appendChild(timestamp);
+				body.innerHTML = parseLinks(msg.message);
+
+				div.appendChild(body);
 
 
-					/* MESSAGE STYLING */
+				/* TIMESTAMP */
 
-					if (msg.sender_id) {
+				const timestamp = document.createElement('small');
 
-						styleMessage(
-							div,
-							msg.sender_id,
-							msg.sender_color,
-							msg.bubble_position
-						);
+				timestamp.textContent = msg.created_at;
 
-					}
+				div.appendChild(timestamp);
 
-					messages.insertBefore(div, typingBubble);
 
-					lastId = Math.max(lastId, Number(msg.id));
+				/* MESSAGE STYLING */
+
+				if (msg.sender_id) {
+
+					styleMessage(
+						div,
+						msg.sender_id,
+						msg.sender_color,
+						msg.bubble_position
+					);
+
+				}
+
+				messages.insertBefore(div, typingBubble);
+
+				lastId = Math.max(lastId, Number(msg.id));
 
 			});
 
@@ -2018,6 +2072,33 @@ chatForm.addEventListener('submit', async function(e) {
 
 		bubblePosition = 'right';
 		setCookie('chat_position', 'right');
+
+		messageInput.value = '';
+		messageInput.focus();
+
+		return;
+	}
+
+	// BEEP COMMANDS
+
+	if (
+		text.toLowerCase() === '/beep' ||
+		text.toLowerCase() === '/beep on'
+	) {
+
+		setCookie('beep', '1');
+
+		messageInput.value = '';
+		messageInput.focus();
+
+		return;
+	}
+
+	if (text.toLowerCase() === '/beep off') {
+
+		// Remove the beep cookie
+		document.cookie =
+			'beep=; max-age=0; path=/; SameSite=Lax';
 
 		messageInput.value = '';
 		messageInput.focus();
