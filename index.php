@@ -44,6 +44,90 @@ CREATE TABLE IF NOT EXISTS chat_users (
 )
 ");
 
+/* ADD LAST TYPED SUPPORT */
+
+$columnExists = $pdo->query("
+	SHOW COLUMNS FROM chat_users LIKE 'last_typed'
+")->fetch();
+
+if (!$columnExists) {
+	$pdo->exec("
+		ALTER TABLE chat_users
+		ADD COLUMN last_typed DATETIME NULL
+	");
+}
+
+/* =================================
+   UPDATE LAST TYPED
+================================= */
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	($_POST['action'] ?? '') === 'typing'
+) {
+
+	header('Content-Type: application/json');
+
+	$senderId = $_COOKIE['chat_id'] ?? '';
+
+	if (!preg_match('/^[a-f0-9]{32}$/', $senderId)) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$typing = ($_POST['typing'] ?? '') === '1';
+
+	if ($typing) {
+
+		$stmt = $pdo->prepare("
+			INSERT INTO chat_users (sender_id, last_seen, last_typed)
+			VALUES (?, NOW(), NOW())
+	
+			ON DUPLICATE KEY UPDATE
+			last_typed = NOW()
+		");
+	
+		$stmt->execute([$senderId]);
+	
+	}
+
+	echo json_encode(['success' => true]);
+	exit;
+}
+
+
+/* =================================
+   FETCH TYPING USERS
+================================= */
+
+if (($_GET['action'] ?? '') === 'typing') {
+
+	header('Content-Type: application/json');
+
+	$senderId = $_COOKIE['chat_id'] ?? '';
+
+	if (!preg_match('/^[a-f0-9]{32}$/', $senderId)) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$stmt = $pdo->prepare("
+		SELECT COUNT(*)
+		FROM chat_users
+		WHERE sender_id != ?
+		AND last_typed >= NOW() - INTERVAL 4 SECOND
+	");
+
+	$stmt->execute([$senderId]);
+
+	echo json_encode([
+		'success' => true,
+		'count' => (int)$stmt->fetchColumn()
+	]);
+
+	exit;
+}
+
 /* SEND MESSAGE */
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
 	&& ($_POST['action'] ?? '') === 'send') {
@@ -620,6 +704,74 @@ MESSAGE CONTEXT MENU
 	outline-offset: 3px;
 }
 
+/* =================================
+   THREE DOT TYPING BUBBLE
+================================= */
+
+.typing-bubble {
+
+	width: fit-content;
+
+	display: flex;
+	align-items: center;
+	gap: 5px;
+
+	padding: 13px 17px;
+
+	margin-bottom: 12px;
+
+	background: #e5e7eb;
+
+	border-radius: 12px;
+	border-bottom-left-radius: 4px;
+
+	box-shadow: 0 1px 3px #0001;
+
+}
+
+.typing-bubble[hidden] {
+	display: none !important;
+}
+
+.typing-bubble span {
+
+	width: 7px;
+	height: 7px;
+
+	background: #777;
+
+	border-radius: 50%;
+
+	animation: typingBounce 1.2s infinite ease-in-out;
+
+}
+
+.typing-bubble span:nth-child(1) {
+	animation-delay: 0s;
+}
+
+.typing-bubble span:nth-child(2) {
+	animation-delay: .15s;
+}
+
+.typing-bubble span:nth-child(3) {
+	animation-delay: .3s;
+}
+
+@keyframes typingBounce {
+
+	0%, 60%, 100% {
+		transform: translateY(0);
+		opacity: .45;
+	}
+
+	30% {
+		transform: translateY(-5px);
+		opacity: 1;
+	}
+
+}
+
 @media(max-width: 600px) {
 
 	.chat-container {
@@ -693,6 +845,16 @@ MESSAGE CONTEXT MENU
 			</div>
 
 		<?php endforeach; ?>
+
+		<!-- TYPING BUBBLE -->
+
+		<div class="typing-bubble" id="typingBubble" hidden>
+
+			<span></span>
+			<span></span>
+			<span></span>
+
+		</div>
 
 	</div>
 
@@ -784,6 +946,11 @@ const cancelReply = document.getElementById('cancelReply');
 const contextMenu = document.getElementById('messageContextMenu');
 const contextReply = document.getElementById('contextReply');
 const contextCopy = document.getElementById('contextCopy');
+const typingBubble = document.getElementById('typingBubble');
+
+let typingTimer = null;
+let typingActive = false;
+let lastTypingSent = 0;
 
 let replyToId = null;
 let selectedMessage = null;
@@ -1515,7 +1682,7 @@ async function loadMessages() {
 
 					}
 
-					messages.appendChild(div);
+					messages.insertBefore(div, typingBubble);
 
 					lastId = Math.max(lastId, Number(msg.id));
 
@@ -1565,6 +1732,163 @@ async function loadMessages() {
 		loading = false;
 	}
 }
+
+/* =================================
+   TYPING NOTIFICATIONS
+================================= */
+
+
+/* SEND TYPING STATUS TO SERVER */
+
+async function sendTypingStatus(typing) {
+
+	try {
+
+		const formData = new FormData();
+
+		formData.append('action', 'typing');
+		formData.append('typing', typing ? '1' : '0');
+
+		await fetch('', {
+			method: 'POST',
+			body: formData
+		});
+
+	} catch (error) {
+
+		console.error('Typing status failed:', error);
+
+	}
+
+}
+
+
+/* USER STARTED TYPING */
+
+function startTyping() {
+
+	if (!typingActive || Date.now() - lastTypingSent >= 2000) {
+
+		typingActive = true;
+
+		lastTypingSent = Date.now();
+
+		sendTypingStatus(true);
+
+	}
+
+	// Reset the stop timer every time they type
+
+	clearTimeout(typingTimer);
+
+	typingTimer = setTimeout(function() {
+
+		stopTyping();
+
+	}, 1800);
+
+}
+
+
+/* USER STOPPED TYPING */
+
+function stopTyping() {
+
+	clearTimeout(typingTimer);
+
+	if (!typingActive) return;
+
+	typingActive = false;
+
+	sendTypingStatus(false);
+
+}
+
+
+/* DETECT TYPING */
+
+messageInput.addEventListener('input', function() {
+
+	if (this.value.trim() === '') {
+
+		stopTyping();
+
+		return;
+
+	}
+
+	startTyping();
+
+});
+
+
+/* STOP TYPING WHEN INPUT LOSES FOCUS */
+
+messageInput.addEventListener('blur', function() {
+
+	stopTyping();
+
+});
+
+
+/* STOP TYPING WHEN MESSAGE IS SENT */
+
+chatForm.addEventListener('submit', function() {
+
+	stopTyping();
+
+});
+
+
+/* =================================
+   CHECK WHETHER OTHER USERS ARE TYPING
+================================= */
+
+async function updateTypingIndicator() {
+
+	try {
+
+		const response = await fetch('?action=typing');
+
+		if (!response.ok) return;
+
+		const data = await response.json();
+
+		if (!data.success) return;
+
+		const shouldShow = data.count > 0;
+
+		const wasAtBottom = isAtBottom();
+
+		const previousScrollTop = messages.scrollTop;
+
+		typingBubble.hidden = !shouldShow;
+
+		if (shouldShow && wasAtBottom) {
+
+			scrollToBottom();
+
+		} else {
+
+			messages.scrollTop = previousScrollTop;
+
+		}
+
+	} catch (error) {
+
+		console.error('Typing indicator update failed:', error);
+
+	}
+
+}
+
+
+
+/* CHECK EVERY SECOND */
+
+updateTypingIndicator();
+
+setInterval(updateTypingIndicator, 1000);
 
 
 /* SEND MESSAGE */
