@@ -79,15 +79,17 @@ if (
 			?
 		)
 
-		ON DUPLICATE KEY UPDATE
+	ON DUPLICATE KEY UPDATE
 
-			has_draft = VALUES(has_draft),
+		last_seen = NOW(),
 
-			last_typed = IF(
-				?,
-				NOW(),
-				last_typed
-			)
+		has_draft = VALUES(has_draft),
+
+		last_typed = IF(
+			?,
+			NOW(),
+			last_typed
+		)
 	");
 
 	$stmt->execute([
@@ -129,6 +131,7 @@ if (($_GET['action'] ?? '') === 'typing') {
 
 		WHERE sender_id != ?
 		AND has_draft = 1
+		AND last_seen >= NOW() - INTERVAL 2 SECOND
 	");
 
 	$stmt->execute([$senderId]);
@@ -281,7 +284,7 @@ if (($_POST['action'] ?? '') === 'online') {
 	$count = $pdo->query("
 		SELECT COUNT(*)
 		FROM chat_users
-		WHERE last_seen >= NOW() - INTERVAL 3 SECOND
+		WHERE last_seen >= NOW() - INTERVAL 2 SECOND
 	")->fetchColumn();
 
 	echo json_encode([
@@ -1614,6 +1617,10 @@ async function loadMessages() {
 
 		if (data.length) {
 
+			// Hide typing indicator when a new message arrives
+			typingBubble.hidden = true;
+			typingBubble.classList.remove('is-animating');
+
 			/*
 			   IMPORTANT:
 
@@ -2033,7 +2040,7 @@ async function updateOnlineCount() {
 updateOnlineCount();
 
 // Update every 2 seconds
-setInterval(updateOnlineCount, 2000);
+setInterval(updateOnlineCount, 1000);
 
 </script>
 
