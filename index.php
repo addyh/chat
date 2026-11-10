@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	sender_id VARCHAR(64) NULL,
 	sender_color VARCHAR(7) NULL,
-	bubble_position ENUM('left', 'right') NULL
+	bubble_position ENUM('left', 'right') NULL,
+	reply_to_id INT NULL
 )
 ");
 
@@ -51,6 +52,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
 	$message = trim($_POST['message'] ?? '');
 
+	$replyToId = null;
+
+	if (isset($_POST['reply_to_id']) && $_POST['reply_to_id'] !== '') {
+
+		$requestedReplyId = filter_var(
+			$_POST['reply_to_id'],
+			FILTER_VALIDATE_INT
+		);
+
+		if ($requestedReplyId === false || $requestedReplyId <= 0) {
+			echo json_encode(['success' => false]);
+			exit;
+		}
+
+		// Make sure the original message actually exists
+		$checkReply = $pdo->prepare("
+			SELECT id FROM chat_messages WHERE id = ?
+		");
+
+		$checkReply->execute([$requestedReplyId]);
+
+		if (!$checkReply->fetchColumn()) {
+			echo json_encode(['success' => false]);
+			exit;
+		}
+
+		$replyToId = $requestedReplyId;
+	}
+
 	// Read identity from browser cookies
 	$senderId = $_COOKIE['chat_id'] ?? '';
 	$senderColor = $_COOKIE['chat_color'] ?? '';
@@ -69,15 +99,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
 	$stmt = $pdo->prepare("
 		INSERT INTO chat_messages
-		(message, sender_id, sender_color, bubble_position)
-		VALUES (?, ?, ?, ?)
+		(message, sender_id, sender_color, bubble_position, reply_to_id)
+		VALUES (?, ?, ?, ?, ?)
 	");
 
 	$stmt->execute([
 		$message,
 		$senderId,
 		$senderColor,
-		$bubblePosition
+		$bubblePosition,
+		$replyToId
 	]);
 
 	echo json_encode(['success' => true]);
@@ -93,10 +124,27 @@ if (($_GET['action'] ?? '') === 'fetch') {
 	$after = max(0, (int)($_GET['after'] ?? 0));
 
 	$stmt = $pdo->prepare("
-		SELECT id, message, created_at, sender_id, sender_color, bubble_position
-		FROM chat_messages
-		WHERE id > ?
-		ORDER BY id ASC
+		SELECT
+			m.id,
+			m.message,
+			m.created_at,
+			m.sender_id,
+			m.sender_color,
+			m.bubble_position,
+			m.reply_to_id,
+
+			r.message AS reply_message,
+			r.sender_id AS reply_sender_id
+
+		FROM chat_messages m
+
+		LEFT JOIN chat_messages r
+			ON m.reply_to_id = r.id
+
+		WHERE m.id > ?
+
+		ORDER BY m.id ASC
+
 		LIMIT 500
 	");
 
@@ -145,23 +193,32 @@ if (($_POST['action'] ?? '') === 'online') {
 }
 
 
-/* LOAD ALL PREVIOUS MESSAGES */
-// $initialMessages = $pdo->query("
-// 	SELECT id, message, created_at, sender_id, sender_color, bubble_position
-// 	FROM chat_messages
-// 	ORDER BY id ASC
-// ")->fetchAll(PDO::FETCH_ASSOC);
-
 /* LOAD LATEST MESSAGES ONLY */
 $initialMessages = $pdo->query("
-	SELECT id, message, created_at, sender_id, sender_color, bubble_position
+	SELECT
+		m.id,
+		m.message,
+		m.created_at,
+		m.sender_id,
+		m.sender_color,
+		m.bubble_position,
+		m.reply_to_id,
+
+		r.message AS reply_message,
+		r.sender_id AS reply_sender_id
+
 	FROM (
-		SELECT id, message, created_at, sender_id, sender_color, bubble_position
+		SELECT *
 		FROM chat_messages
 		ORDER BY id DESC
 		LIMIT 4600
-	) AS recent_messages
-	ORDER BY id ASC
+	) AS m
+
+	LEFT JOIN chat_messages r
+		ON m.reply_to_id = r.id
+
+	ORDER BY m.id ASC
+
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 ?>
@@ -409,13 +466,159 @@ body {
 }
 
 /* Hide button when there are no unread messages */
-.unread-count[hidden] {
-	display: none;
-}
+[hidden],
+.unread-count[hidden],
 .new-messages-button[hidden] {
-	display: none;
+	display: none !important;
 }
 
+/* =================================
+REPLY PREVIEW INSIDE MESSAGES
+================================= */
+
+.message-reply {
+	padding: 8px 11px;
+	margin-bottom: 9px;
+
+	border-left: 4px solid #2563eb;
+	border-radius: 5px;
+
+	background: #0000000d;
+
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.message-reply strong {
+	display: block;
+	font-size: 11px;
+	margin-bottom: 3px;
+	color: #2563eb;
+}
+
+.message-reply span {
+	display: block;
+	font-size: 12px;
+	opacity: .8;
+
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* =================================
+REPLY COMPOSER
+================================= */
+
+.input-area {
+	flex-direction: column;
+}
+
+.composer-row {
+	display: flex;
+	gap: 10px;
+	width: 100%;
+}
+
+.reply-preview {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+
+	padding: 9px 12px;
+
+	background: #f0f4ff;
+	border-left: 4px solid #2563eb;
+	border-radius: 7px;
+	width: calc(100% - 60px);
+}
+
+.reply-preview-content {
+	min-width: 0;
+	flex: 1;
+}
+
+.reply-preview-content strong {
+	display: block;
+	font-size: 12px;
+	color: #2563eb;
+	margin-bottom: 3px;
+}
+
+.reply-preview-content span {
+	display: block;
+	font-size: 12px;
+	color: #555;
+
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+button.cancel-reply {
+	border: none;
+	background: transparent;
+	color: #666;
+	font-size: 21px;
+	cursor: pointer;
+	padding: 4px 8px;
+}
+
+/* =================================
+MESSAGE CONTEXT MENU
+================================= */
+
+.message-context-menu {
+	position: fixed;
+	z-index: 1000;
+
+	min-width: 155px;
+
+	padding: 5px;
+
+	background: white;
+	border-radius: 9px;
+
+	box-shadow: 0 4px 20px #0003;
+	border: 1px solid #ddd;
+}
+
+.message-context-menu button {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+
+	width: 100%;
+
+	padding: 11px 12px;
+
+	border: none;
+	border-radius: 5px;
+
+	background: white;
+	color: #222;
+
+	font-size: 14px;
+	text-align: left;
+
+	cursor: pointer;
+}
+
+.message-context-menu button:hover {
+	background: #f0f3f8;
+}
+
+.message.dragging {
+	transition: none;
+	opacity: .8;
+	box-shadow: 0 3px 12px #0003;
+}
+
+.message.reply-highlight {
+	outline: 2px solid #2563eb;
+	outline-offset: 3px;
+}
 
 @media(max-width: 600px) {
 
@@ -464,8 +667,28 @@ body {
 				data-sender-id="<?= htmlspecialchars($msg['sender_id'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
 				data-color="<?= htmlspecialchars($msg['sender_color'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
 				data-position="<?= htmlspecialchars($msg['bubble_position'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+				data-reply-to="<?= (int)($msg['reply_to_id'] ?? 0) ?>"
 			>
-				<div><?= nl2br(htmlspecialchars($msg['message'], ENT_QUOTES, 'UTF-8')) ?></div>
+
+				<?php if (!empty($msg['reply_to_id']) && $msg['reply_message'] !== null): ?>
+
+					<div class="message-reply"
+						data-reply-target="<?= (int)$msg['reply_to_id'] ?>">
+
+						<strong>Replying to <?=
+							($msg['reply_sender_id'] ?? '') === ($_COOKIE['chat_id'] ?? '')
+							? 'yourself'
+							: 'message'
+						?></strong>
+
+						<span><?= htmlspecialchars($msg['reply_message'], ENT_QUOTES, 'UTF-8') ?></span>
+
+					</div>
+
+				<?php endif; ?>
+
+				<div class="message-body"><?= nl2br(htmlspecialchars($msg['message'], ENT_QUOTES, 'UTF-8')) ?></div>
+
 				<small><?= htmlspecialchars($msg['created_at']) ?></small>
 			</div>
 
@@ -494,16 +717,55 @@ body {
 	</button>
 
 	<form class="input-area" id="chatForm">
-		<input
-			type="text"
-			id="message"
-			placeholder="Write a message..."
-			autocomplete="off"
-			maxlength="5000"
-			required
-		>
-		<button type="submit" id="sendButton">Send</button>
+
+		<!-- REPLY PREVIEW -->
+
+		<div class="reply-preview" id="replyPreview" hidden>
+
+			<div class="reply-preview-content">
+				<strong id="replyPreviewTitle">Replying to message</strong>
+				<span id="replyPreviewText"></span>
+			</div>
+
+			<button
+				type="button"
+				class="cancel-reply"
+				id="cancelReply"
+				aria-label="Cancel reply"
+			>&times;</button>
+
+		</div>
+
+		<!-- MESSAGE INPUT -->
+
+		<div class="composer-row">
+
+			<input
+				type="text"
+				id="message"
+				placeholder="Write a message..."
+				autocomplete="off"
+				maxlength="5000"
+				required
+			>
+
+			<button type="submit" id="sendButton">Send</button>
+
+		</div>
+
 	</form>
+
+</div>
+
+<div class="message-context-menu" id="messageContextMenu" hidden>
+
+	<button type="button" id="contextReply">
+		<span>↩</span> Reply
+	</button>
+
+	<button type="button" id="contextCopy">
+		<span>▢</span> Copy
+	</button>
 
 </div>
 
@@ -515,7 +777,16 @@ const sendButton = document.getElementById('sendButton');
 const bubbleColorPicker = document.getElementById('bubbleColor');
 const newMessagesButton = document.getElementById('newMessagesButton');
 const unreadCountDisplay = document.getElementById('unreadCount');
+const replyPreview = document.getElementById('replyPreview');
+const replyPreviewTitle = document.getElementById('replyPreviewTitle');
+const replyPreviewText = document.getElementById('replyPreviewText');
+const cancelReply = document.getElementById('cancelReply');
+const contextMenu = document.getElementById('messageContextMenu');
+const contextReply = document.getElementById('contextReply');
+const contextCopy = document.getElementById('contextCopy');
 
+let replyToId = null;
+let selectedMessage = null;
 
 /* COOKIE HELPERS */
 
@@ -747,6 +1018,386 @@ function escapeHTML(str) {
 	})[char]);
 }
 
+/* =================================
+   REPLY SYSTEM
+================================= */
+
+
+/* GET MESSAGE TEXT */
+
+function getMessageText(div) {
+
+	return div.querySelector('.message-body').textContent;
+
+}
+
+
+/* START REPLY */
+
+function startReply(div) {
+
+	if (!div) return;
+
+	replyToId = div.dataset.id;
+
+	const messageText = getMessageText(div);
+
+	const originalSender = div.dataset.senderId;
+
+	const senderName =
+		originalSender === senderId ? 'yourself' : 'message';
+
+	replyPreviewTitle.textContent =
+		'Replying to ' + senderName;
+
+	replyPreviewText.textContent = messageText;
+
+	replyPreview.hidden = false;
+
+	messageInput.focus();
+
+	closeContextMenu();
+
+}
+
+
+/* CANCEL REPLY */
+
+function cancelReplyMode() {
+
+	replyToId = null;
+
+	replyPreview.hidden = true;
+
+	replyPreviewText.textContent = '';
+
+}
+
+cancelReply.addEventListener('click', cancelReplyMode);
+
+
+/* CLOSE CONTEXT MENU */
+
+function closeContextMenu() {
+
+	contextMenu.hidden = true;
+
+	selectedMessage = null;
+
+}
+
+
+/* OPEN CONTEXT MENU */
+
+function openContextMenu(div, x, y) {
+
+	selectedMessage = div;
+
+	contextMenu.hidden = false;
+
+	const menuWidth = 170;
+	const menuHeight = 110;
+
+	contextMenu.style.left =
+		Math.min(x, window.innerWidth - menuWidth - 10) + 'px';
+
+	contextMenu.style.top =
+		Math.min(y, window.innerHeight - menuHeight - 10) + 'px';
+
+}
+
+
+/* RIGHT CLICK */
+
+messages.addEventListener('contextmenu', function(e) {
+
+	const div = e.target.closest('.message');
+
+	if (!div) return;
+
+	e.preventDefault();
+
+	openContextMenu(div, e.clientX, e.clientY);
+
+});
+
+
+/* REPLY FROM CONTEXT MENU */
+
+contextReply.addEventListener('click', function() {
+
+	if (selectedMessage) {
+
+		const div = selectedMessage;
+
+		startReply(div);
+
+	}
+
+});
+
+
+/* COPY FROM CONTEXT MENU */
+
+contextCopy.addEventListener('click', async function() {
+
+	if (!selectedMessage) return;
+
+	const text = getMessageText(selectedMessage);
+
+	try {
+
+		await navigator.clipboard.writeText(text);
+
+	} catch (error) {
+
+		// Fallback for browsers without clipboard permission
+		const textarea = document.createElement('textarea');
+
+		textarea.value = text;
+
+		document.body.appendChild(textarea);
+
+		textarea.select();
+
+		document.execCommand('copy');
+
+		textarea.remove();
+
+	}
+
+	closeContextMenu();
+
+});
+
+
+/* CLOSE MENU WHEN CLICKING ELSEWHERE */
+
+document.addEventListener('click', function(e) {
+
+	if (
+		!contextMenu.contains(e.target) &&
+		!e.target.closest('.message')
+	) {
+
+		closeContextMenu();
+
+	}
+
+});
+
+
+/* CLOSE MENU ON ESCAPE */
+
+document.addEventListener('keydown', function(e) {
+
+	if (e.key === 'Escape') {
+
+		closeContextMenu();
+
+		cancelReplyMode();
+
+	}
+
+});
+
+
+/* =================================
+   DRAG MESSAGE TO REPLY
+================================= */
+
+let dragMessage = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragCurrentX = 0;
+let dragCurrentY = 0;
+
+let longPressTimer = null;
+let longPressTriggered = false;
+
+const DRAG_THRESHOLD = 65;
+const LONG_PRESS_DURATION = 550;
+
+
+/* POINTER DOWN */
+
+messages.addEventListener('pointerdown', function(e) {
+
+	const div = e.target.closest('.message');
+
+	if (!div || e.button !== 0) return;
+
+	dragMessage = div;
+
+	dragStartX = e.clientX;
+	dragStartY = e.clientY;
+
+	dragCurrentX = e.clientX;
+	dragCurrentY = e.clientY;
+
+	longPressTriggered = false;
+
+	/*
+	   Long press for touch devices.
+	*/
+
+	if (e.pointerType === 'touch') {
+
+		longPressTimer = setTimeout(function() {
+
+			if (dragMessage) {
+
+				longPressTriggered = true;
+
+				openContextMenu(
+					dragMessage,
+					dragCurrentX,
+					dragCurrentY
+				);
+
+			}
+
+		}, LONG_PRESS_DURATION);
+
+	}
+
+});
+
+
+/* POINTER MOVE */
+
+document.addEventListener('pointermove', function(e) {
+
+	if (!dragMessage) return;
+
+	dragCurrentX = e.clientX;
+	dragCurrentY = e.clientY;
+
+	const dx = e.clientX - dragStartX;
+	const dy = e.clientY - dragStartY;
+
+	/*
+	   Cancel long press if the user moves.
+	*/
+
+	if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+
+		clearTimeout(longPressTimer);
+
+	}
+
+	/*
+	   Only activate reply dragging when moving
+	   horizontally to the RIGHT.
+
+	   Vertical movement remains normal scrolling.
+	*/
+
+	if (
+		dx > 0 &&
+		dx > Math.abs(dy) * 1.3
+	) {
+
+		if (dx > 10) {
+
+			dragMessage.classList.add('dragging');
+
+			dragMessage.style.transform =
+				'translateX(' + Math.min(dx, 100) + 'px)';
+
+		}
+
+	}
+
+});
+
+
+/* POINTER UP */
+
+document.addEventListener('pointerup', function(e) {
+
+	if (!dragMessage) return;
+
+	clearTimeout(longPressTimer);
+
+	const dx = e.clientX - dragStartX;
+	const dy = e.clientY - dragStartY;
+
+	const div = dragMessage;
+
+	div.classList.remove('dragging');
+
+	div.style.transform = '';
+
+	/*
+	   Only reply if the message was dragged
+	   sufficiently far to the right.
+	*/
+
+	if (
+		!longPressTriggered &&
+		dx >= DRAG_THRESHOLD &&
+		dx > Math.abs(dy) * 1.3
+	) {
+
+		startReply(div);
+
+	}
+
+	dragMessage = null;
+
+});
+
+
+/* CANCEL POINTER */
+
+document.addEventListener('pointercancel', function() {
+
+	clearTimeout(longPressTimer);
+
+	if (dragMessage) {
+
+		dragMessage.classList.remove('dragging');
+
+		dragMessage.style.transform = '';
+
+	}
+
+	dragMessage = null;
+
+});
+
+/* JUMP TO ORIGINAL REPLIED MESSAGE */
+
+messages.addEventListener('click', function(e) {
+
+	const reply = e.target.closest('.message-reply');
+
+	if (!reply) return;
+
+	const targetId = reply.dataset.replyTarget;
+
+	const originalMessage = messages.querySelector(
+		'.message[data-id="' + targetId + '"]'
+	);
+
+	if (!originalMessage) return;
+
+	originalMessage.scrollIntoView({
+		behavior: 'smooth',
+		block: 'center'
+	});
+
+	originalMessage.classList.add('reply-highlight');
+
+	setTimeout(() => {
+
+		originalMessage.classList.remove('reply-highlight');
+
+	}, 1500);
+
+});
+
 
 /* =================================
    LOAD NEW MESSAGES
@@ -793,35 +1444,80 @@ async function loadMessages() {
 
 				const div = document.createElement('div');
 
-				div.className = 'message';
+					div.className = 'message';
 
-				div.dataset.id = msg.id;
-				div.dataset.senderId = msg.sender_id || '';
-				div.dataset.color = msg.sender_color || '';
-				div.dataset.position = msg.bubble_position || '';
+					div.dataset.id = msg.id;
+					div.dataset.senderId = msg.sender_id || '';
+					div.dataset.color = msg.sender_color || '';
+					div.dataset.position = msg.bubble_position || '';
+					div.dataset.replyTo = msg.reply_to_id || '0';
 
-				div.innerHTML =
-					'<div>' +
-					escapeHTML(msg.message).replace(/\n/g, '<br>') +
-					'</div>' +
-					'<small>' +
-					escapeHTML(msg.created_at) +
-					'</small>';
 
-				if (msg.sender_id) {
+					/* REPLY PREVIEW */
 
-					styleMessage(
-						div,
-						msg.sender_id,
-						msg.sender_color,
-						msg.bubble_position
-					);
+					if (msg.reply_to_id && msg.reply_message !== null) {
 
-				}
+						const reply = document.createElement('div');
 
-				messages.appendChild(div);
+						reply.className = 'message-reply';
 
-				lastId = Math.max(lastId, Number(msg.id));
+						reply.dataset.replyTarget = msg.reply_to_id;
+
+						const replyTitle = document.createElement('strong');
+
+						replyTitle.textContent =
+							msg.reply_sender_id === senderId
+							? 'Replying to yourself'
+							: 'Replying to message';
+
+						const replyText = document.createElement('span');
+
+						replyText.textContent = msg.reply_message;
+
+						reply.appendChild(replyTitle);
+						reply.appendChild(replyText);
+
+						div.appendChild(reply);
+
+					}
+
+
+					/* MESSAGE BODY */
+
+					const body = document.createElement('div');
+
+					body.className = 'message-body';
+
+					body.textContent = msg.message;
+
+					div.appendChild(body);
+
+
+					/* TIMESTAMP */
+
+					const timestamp = document.createElement('small');
+
+					timestamp.textContent = msg.created_at;
+
+					div.appendChild(timestamp);
+
+
+					/* MESSAGE STYLING */
+
+					if (msg.sender_id) {
+
+						styleMessage(
+							div,
+							msg.sender_id,
+							msg.sender_color,
+							msg.bubble_position
+						);
+
+					}
+
+					messages.appendChild(div);
+
+					lastId = Math.max(lastId, Number(msg.id));
 
 			});
 
@@ -911,6 +1607,10 @@ chatForm.addEventListener('submit', async function(e) {
 	formData.append('action', 'send');
 	formData.append('message', text);
 
+	if (replyToId !== null) {
+		formData.append('reply_to_id', replyToId);
+	}
+
 	try {
 
 		const response = await fetch('', {
@@ -923,7 +1623,7 @@ chatForm.addEventListener('submit', async function(e) {
 		if (result.success) {
 
 			messageInput.value = '';
-
+			cancelReplyMode();
 			await loadMessages();
 
 		} else {
