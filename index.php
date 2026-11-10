@@ -1089,6 +1089,7 @@ const BOTTOM_THRESHOLD = 32;
 */
 
 let unreadMessages = 0;
+let scrollHistory = [];
 
 
 /* CHECK WHETHER USER IS AT BOTTOM */
@@ -1112,19 +1113,39 @@ function scrollToBottom() {
 
 }
 
+// Return to the previous scroll location
+function goBackToPreviousScroll() {
+
+	if (scrollHistory.length > 0) {
+
+		const previousPosition = scrollHistory.pop();
+
+		messages.scrollTo({
+			top: previousPosition,
+			behavior: 'smooth'
+		});
+
+	} else {
+
+		// No previous location: go to actual bottom
+		scrollToBottom();
+
+	}
+
+	clearUnreadMessages();
+
+}
 
 /* UPDATE UNREAD MESSAGE INDICATOR */
 
 function updateUnreadIndicator() {
 
-	// Show arrow whenever not at bottom
-	newMessagesButton.hidden = isAtBottom();
+    // Show arrow if there is scroll history OR the user isn't at bottom
+    newMessagesButton.hidden = scrollHistory.length === 0 && isAtBottom();
 
-	// Update notification number
-	unreadCountDisplay.textContent = unreadMessages;
+    unreadCountDisplay.textContent = unreadMessages;
 
-	// Hide red circle when count is zero
-	unreadCountDisplay.hidden = unreadMessages === 0;
+    unreadCountDisplay.hidden = unreadMessages === 0;
 
 }
 
@@ -1144,9 +1165,7 @@ function clearUnreadMessages() {
 
 newMessagesButton.addEventListener('click', function() {
 
-	scrollToBottom();
-
-	clearUnreadMessages();
+	goBackToPreviousScroll();
 
 });
 
@@ -1578,6 +1597,9 @@ messages.addEventListener('click', function(e) {
 	);
 
 	if (!originalMessage) return;
+
+	// Remember current scroll position
+	scrollHistory.push(messages.scrollTop);
 
 	originalMessage.scrollIntoView({
 		behavior: 'smooth',
