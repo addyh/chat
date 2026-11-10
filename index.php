@@ -1140,12 +1140,12 @@ function goBackToPreviousScroll() {
 
 function updateUnreadIndicator() {
 
-    // Show arrow if there is scroll history OR the user isn't at bottom
-    newMessagesButton.hidden = scrollHistory.length === 0 && isAtBottom();
+	// Show arrow if there is scroll history OR the user isn't at bottom
+	newMessagesButton.hidden = scrollHistory.length === 0 && isAtBottom();
 
-    unreadCountDisplay.textContent = unreadMessages;
+	unreadCountDisplay.textContent = unreadMessages;
 
-    unreadCountDisplay.hidden = unreadMessages === 0;
+	unreadCountDisplay.hidden = unreadMessages === 0;
 
 }
 
