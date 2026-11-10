@@ -450,6 +450,16 @@ body {
 	opacity: .7;
 }
 
+.message-body a {
+	color: #2563eb;
+	text-decoration: underline;
+	overflow-wrap: anywhere;
+}
+
+.message-body a:hover {
+	color: #1d4ed8;
+}
+
 .input-area {
 	display: flex;
 	padding: 15px;
@@ -1218,6 +1228,12 @@ existingMessages.forEach(div => {
 		// Older messages created before cookie identities
 		div.classList.add('left');
 	}
+
+	const body = div.querySelector('.message-body');
+	if (body) {
+		body.innerHTML = parseLinks(body.textContent);
+	}
+
 });
 
 
@@ -1231,6 +1247,30 @@ function escapeHTML(str) {
 		'"': '&quot;',
 		"'": '&#039;'
 	})[char]);
+}
+
+/* PARSE LINKS */
+
+function parseLinks(text) {
+
+	const escaped = escapeHTML(text);
+
+	const urlRegex = /https?:\/\/[^\s<]+/gi;
+
+	return escaped.replace(urlRegex, function(url) {
+
+		// Remove trailing punctuation from the clickable URL
+		const punctuation = /[.,!?;:)]+$/;
+		const trailing = (url.match(punctuation) || [''])[0];
+
+		const cleanUrl = url.slice(0, url.length - trailing.length);
+
+		return '<a href="' + cleanUrl +
+			'" target="_blank" rel="noopener noreferrer">' +
+			cleanUrl +
+			'</a>' + trailing;
+
+	}).replace(/\n/g, '<br>');
 }
 
 /* =================================
@@ -1717,7 +1757,7 @@ async function loadMessages() {
 
 					body.className = 'message-body';
 
-					body.textContent = msg.message;
+					body.innerHTML = parseLinks(msg.message);
 
 					div.appendChild(body);
 
