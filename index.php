@@ -39,26 +39,16 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 $pdo->exec("
 CREATE TABLE IF NOT EXISTS chat_users (
 	sender_id VARCHAR(64) PRIMARY KEY,
-	last_seen TIMESTAMP NOT NULL
-	DEFAULT CURRENT_TIMESTAMP
+	last_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_typed DATETIME NULL,
+	has_draft TINYINT(1) NOT NULL DEFAULT 0
 )
 ");
 
-/* ADD LAST TYPED SUPPORT */
 
-$columnExists = $pdo->query("
-	SHOW COLUMNS FROM chat_users LIKE 'last_typed'
-")->fetch();
-
-if (!$columnExists) {
-	$pdo->exec("
-		ALTER TABLE chat_users
-		ADD COLUMN last_typed DATETIME NULL
-	");
-}
 
 /* =================================
-   UPDATE LAST TYPED
+   UPDATE TYPING STATUS
 ================================= */
 
 if (
@@ -75,21 +65,37 @@ if (
 		exit;
 	}
 
-	$typing = ($_POST['typing'] ?? '') === '1';
+	$hasDraft = ($_POST['has_draft'] ?? '') === '1';
+	$active = ($_POST['active'] ?? '') === '1';
 
-	if ($typing) {
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_users
+			(sender_id, last_seen, last_typed, has_draft)
 
-		$stmt = $pdo->prepare("
-			INSERT INTO chat_users (sender_id, last_seen, last_typed)
-			VALUES (?, NOW(), NOW())
-	
-			ON DUPLICATE KEY UPDATE
-			last_typed = NOW()
-		");
-	
-		$stmt->execute([$senderId]);
-	
-	}
+		VALUES (
+			?,
+			NOW(),
+			IF(?, NOW(), NULL),
+			?
+		)
+
+		ON DUPLICATE KEY UPDATE
+
+			has_draft = VALUES(has_draft),
+
+			last_typed = IF(
+				?,
+				NOW(),
+				last_typed
+			)
+	");
+
+	$stmt->execute([
+		$senderId,
+		(int)$active,
+		(int)$hasDraft,
+		(int)$active
+	]);
 
 	echo json_encode(['success' => true]);
 	exit;
@@ -97,7 +103,7 @@ if (
 
 
 /* =================================
-   FETCH TYPING USERS
+   FETCH TYPING STATUS
 ================================= */
 
 if (($_GET['action'] ?? '') === 'typing') {
@@ -112,17 +118,27 @@ if (($_GET['action'] ?? '') === 'typing') {
 	}
 
 	$stmt = $pdo->prepare("
-		SELECT COUNT(*)
+		SELECT
+			COUNT(*) AS typing_count,
+
+			MAX(
+				last_typed >= NOW() - INTERVAL 2 SECOND
+			) AS actively_typing
+
 		FROM chat_users
+
 		WHERE sender_id != ?
-		AND last_typed >= NOW() - INTERVAL 4 SECOND
+		AND has_draft = 1
 	");
 
 	$stmt->execute([$senderId]);
 
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+
 	echo json_encode([
 		'success' => true,
-		'count' => (int)$stmt->fetchColumn()
+		'count' => (int)$result['typing_count'],
+		'active' => (bool)$result['actively_typing']
 	]);
 
 	exit;
@@ -717,7 +733,6 @@ MESSAGE CONTEXT MENU
 	gap: 5px;
 
 	padding: 13px 17px;
-
 	margin-bottom: 12px;
 
 	background: #e5e7eb;
@@ -742,19 +757,30 @@ MESSAGE CONTEXT MENU
 
 	border-radius: 50%;
 
+	/* Stationary by default */
+
+	transform: translateY(0);
+	opacity: .65;
+
+}
+
+/* Only animate when actively typing */
+
+.typing-bubble.is-animating span {
+
 	animation: typingBounce 1.2s infinite ease-in-out;
 
 }
 
-.typing-bubble span:nth-child(1) {
+.typing-bubble.is-animating span:nth-child(1) {
 	animation-delay: 0s;
 }
 
-.typing-bubble span:nth-child(2) {
+.typing-bubble.is-animating span:nth-child(2) {
 	animation-delay: .15s;
 }
 
-.typing-bubble span:nth-child(3) {
+.typing-bubble.is-animating span:nth-child(3) {
 	animation-delay: .3s;
 }
 
@@ -1733,21 +1759,22 @@ async function loadMessages() {
 	}
 }
 
+
 /* =================================
    TYPING NOTIFICATIONS
 ================================= */
 
+/* SEND TYPING STATUS */
 
-/* SEND TYPING STATUS TO SERVER */
-
-async function sendTypingStatus(typing) {
+async function sendTypingStatus(hasDraft, active) {
 
 	try {
 
 		const formData = new FormData();
 
 		formData.append('action', 'typing');
-		formData.append('typing', typing ? '1' : '0');
+		formData.append('has_draft', hasDraft ? '1' : '0');
+		formData.append('active', active ? '1' : '0');
 
 		await fetch('', {
 			method: 'POST',
@@ -1763,21 +1790,19 @@ async function sendTypingStatus(typing) {
 }
 
 
-/* USER STARTED TYPING */
+/* USER STARTS TYPING */
 
 function startTyping() {
 
-	if (!typingActive || Date.now() - lastTypingSent >= 2000) {
+	typingActive = true;
 
-		typingActive = true;
+	if (Date.now() - lastTypingSent >= 1000) {
 
 		lastTypingSent = Date.now();
 
-		sendTypingStatus(true);
+		sendTypingStatus(true, true);
 
 	}
-
-	// Reset the stop timer every time they type
 
 	clearTimeout(typingTimer);
 
@@ -1785,12 +1810,12 @@ function startTyping() {
 
 		stopTyping();
 
-	}, 1800);
+	}, 1500);
 
 }
 
 
-/* USER STOPPED TYPING */
+/* USER STOPS TYPING */
 
 function stopTyping() {
 
@@ -1800,18 +1825,28 @@ function stopTyping() {
 
 	typingActive = false;
 
-	sendTypingStatus(false);
+	// Keep the draft, but stop the animation
+	sendTypingStatus(true, false);
 
 }
 
 
-/* DETECT TYPING */
+/* INPUT CHANGES */
 
 messageInput.addEventListener('input', function() {
 
-	if (this.value.trim() === '') {
+	const hasDraft = this.value.trim() !== '';
 
-		stopTyping();
+	if (!hasDraft) {
+
+		clearTimeout(typingTimer);
+
+		typingActive = false;
+
+		lastTypingSent = 0;
+
+		// Remove typing bubble completely for other users
+		sendTypingStatus(false, false);
 
 		return;
 
@@ -1822,7 +1857,7 @@ messageInput.addEventListener('input', function() {
 });
 
 
-/* STOP TYPING WHEN INPUT LOSES FOCUS */
+/* STOP ACTIVE TYPING WHEN INPUT LOSES FOCUS */
 
 messageInput.addEventListener('blur', function() {
 
@@ -1830,19 +1865,6 @@ messageInput.addEventListener('blur', function() {
 
 });
 
-
-/* STOP TYPING WHEN MESSAGE IS SENT */
-
-chatForm.addEventListener('submit', function() {
-
-	stopTyping();
-
-});
-
-
-/* =================================
-   CHECK WHETHER OTHER USERS ARE TYPING
-================================= */
 
 async function updateTypingIndicator() {
 
@@ -1857,12 +1879,17 @@ async function updateTypingIndicator() {
 		if (!data.success) return;
 
 		const shouldShow = data.count > 0;
-
 		const wasAtBottom = isAtBottom();
-
 		const previousScrollTop = messages.scrollTop;
 
+		// Show bubble if anyone has an unsent draft
 		typingBubble.hidden = !shouldShow;
+
+		// Animate only if someone is actively typing
+		typingBubble.classList.toggle(
+			'is-animating',
+			data.active
+		);
 
 		if (shouldShow && wasAtBottom) {
 
@@ -1881,8 +1908,6 @@ async function updateTypingIndicator() {
 	}
 
 }
-
-
 
 /* CHECK EVERY SECOND */
 
@@ -1947,6 +1972,8 @@ chatForm.addEventListener('submit', async function(e) {
 		if (result.success) {
 
 			messageInput.value = '';
+			// Notify other users that the input is now empty
+			messageInput.dispatchEvent(new Event('input'));
 			cancelReplyMode();
 			await loadMessages();
 
