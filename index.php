@@ -1255,6 +1255,8 @@ function startReply(div) {
 
 	replyToId = div.dataset.id;
 
+	const wasAtBottom = isAtBottom();
+
 	const messageText = getMessageText(div);
 
 	const originalSender = div.dataset.senderId;
@@ -1268,6 +1270,11 @@ function startReply(div) {
 	replyPreviewText.textContent = messageText;
 
 	replyPreview.hidden = false;
+
+	// Keep the latest messages visible if already at bottom
+	if (wasAtBottom) {
+		scrollToBottom();
+	}
 
 	messageInput.focus();
 
