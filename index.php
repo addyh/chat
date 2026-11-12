@@ -1,11 +1,4 @@
 <?php
-/*
-
-things to fix:
-
- - users want to be able to set a name for themselves
-
-*/
 session_start();
 
 /* DATABASE SETTINGS */
@@ -338,7 +331,8 @@ if (($_GET['action'] ?? '') === 'fetch') {
 			m.reply_to_id,
 
 			r.message AS reply_message,
-			r.sender_id AS reply_sender_id
+			r.sender_id AS reply_sender_id,
+			r.sender_name AS reply_sender_name
 
 		FROM chat_messages m
 
@@ -410,7 +404,8 @@ $initialMessages = $pdo->query("
 		m.reply_to_id,
 
 		r.message AS reply_message,
-		r.sender_id AS reply_sender_id
+		r.sender_id AS reply_sender_id,
+		r.sender_name AS reply_sender_name
 
 	FROM (
 		SELECT *
@@ -1009,10 +1004,14 @@ MESSAGE CONTEXT MENU
 					<div class="message-reply"
 						data-reply-target="<?= (int)$msg['reply_to_id'] ?>">
 
-						<strong>Replying to <?=
+						<strong>Replying to <?= 
 							($msg['reply_sender_id'] ?? '') === ($_COOKIE['chat_id'] ?? '')
-							? 'yourself'
-							: 'message'
+							? 'you'
+							: htmlspecialchars(
+								trim($msg['reply_sender_name'] ?? '') ?: 'message',
+								ENT_QUOTES,
+								'UTF-8'
+							)
 						?></strong>
 
 						<span><?= htmlspecialchars($msg['reply_message'], ENT_QUOTES, 'UTF-8') ?></span>
@@ -1750,11 +1749,16 @@ function startReply(div) {
 
 	const originalSender = div.dataset.senderId;
 
-	const senderName =
-		originalSender === senderId ? 'yourself' : 'message';
+	const originalName =
+		div.querySelector('.message-name')?.textContent.trim() || '';
+
+	const replyName =
+		originalSender === senderId
+		? 'yourself'
+		: (originalName || 'message');
 
 	replyPreviewTitle.textContent =
-		'Replying to ' + senderName;
+		'Replying to ' + replyName;
 
 	replyPreviewText.textContent = messageText;
 
@@ -2200,6 +2204,15 @@ async function loadMessages() {
 					playBeep();
 				}
 
+				/* SENDER NAME */
+
+				const name = document.createElement('div');
+
+				name.className = 'message-name';
+				name.textContent = msg.sender_name || '';
+
+				div.appendChild(name);
+
 				/* REPLY PREVIEW */
 
 				if (msg.reply_to_id && msg.reply_message !== null) {
@@ -2212,10 +2225,12 @@ async function loadMessages() {
 
 					const replyTitle = document.createElement('strong');
 
+					const replyName = (msg.reply_sender_name || '').trim();
+
 					replyTitle.textContent =
 						msg.reply_sender_id === senderId
-						? 'Replying to yourself'
-						: 'Replying to message';
+						? 'Replying to ' + (senderId === msg.sender_id ? 'yourself' : 'you')
+						: 'Replying to ' + (replyName || 'message');
 
 					const replyText = document.createElement('span');
 
@@ -2227,15 +2242,6 @@ async function loadMessages() {
 					div.appendChild(reply);
 
 				}
-
-				/* SENDER NAME */
-
-				const name = document.createElement('div');
-
-				name.className = 'message-name';
-				name.textContent = msg.sender_name || '';
-
-				div.appendChild(name);
 
 				/* MESSAGE BODY */
 
