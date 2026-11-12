@@ -3,8 +3,6 @@
 
 things to fix:
 
- - changing and changing back screen orientation puts you at a
-    random-ass position in the chat
  - being at the bottom of the chat, and being at the bottom of the
     scroll-down-button history stack needs to both hide the down-arrow button
     (while ensuring the up-arrow-upon-page-load showing unread count still works)
@@ -1314,6 +1312,107 @@ function isAtBottom() {
 
 }
 
+/* =================================
+   PRESERVE CHAT POSITION ON RESIZE
+================================= */
+
+let savedScrollAnchor = null;
+let savedWasAtBottom = true;
+let restoringViewport = false;
+
+/* REMEMBER THE CURRENT READING POSITION */
+
+function saveScrollAnchor() {
+
+	if (restoringViewport) return;
+
+	savedWasAtBottom = isAtBottom();
+
+	const containerRect = messages.getBoundingClientRect();
+
+	const visibleMessages = messages.querySelectorAll('.message');
+
+	for (const msg of visibleMessages) {
+
+		const rect = msg.getBoundingClientRect();
+
+		// Find the first message visible in the viewport
+		if (rect.bottom > containerRect.top) {
+
+			savedScrollAnchor = {
+				id: msg.dataset.id,
+				offset: rect.top - containerRect.top
+			};
+
+			return;
+		}
+
+	}
+
+	savedScrollAnchor = null;
+}
+
+
+/* RESTORE POSITION AFTER SCREEN RESIZE */
+
+function restoreScrollAnchor() {
+
+	restoringViewport = true;
+
+	requestAnimationFrame(() => {
+
+		requestAnimationFrame(() => {
+
+			// If the user was at the bottom, keep them there
+			if (savedWasAtBottom) {
+
+				messages.scrollTop = messages.scrollHeight;
+
+			} else if (savedScrollAnchor) {
+
+				const anchor = messages.querySelector(
+					'.message[data-id="' + savedScrollAnchor.id + '"]'
+				);
+
+				if (anchor) {
+
+					const containerRect = messages.getBoundingClientRect();
+					const currentOffset =
+						anchor.getBoundingClientRect().top - containerRect.top;
+
+					messages.scrollTop +=
+						currentOffset - savedScrollAnchor.offset;
+
+				}
+
+			}
+
+			restoringViewport = false;
+
+			// Save the newly restored position
+			saveScrollAnchor();
+
+		});
+
+	});
+
+}
+
+
+/* DETECT ORIENTATION AND VIEWPORT CHANGES */
+
+window.addEventListener('resize', function() {
+
+	restoreScrollAnchor();
+
+});
+
+window.addEventListener('orientationchange', function() {
+
+	restoreScrollAnchor();
+
+});
+
 
 /* SCROLL TO BOTTOM */
 
@@ -1458,6 +1557,9 @@ newMessagesButton.addEventListener('click', function() {
 let initialUnreadCount = true;
 
 messages.addEventListener('scroll', function() {
+
+	// Remember position for orientation changes
+	saveScrollAnchor();
 
 	if (isAtBottom()) {
 
