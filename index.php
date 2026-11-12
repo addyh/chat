@@ -1,4 +1,14 @@
 <?php
+/*
+
+to do:
+
+ - emoji reactions
+ - stickers
+ - phone notifications
+ - system messages
+
+*/
 session_start();
 
 /* DATABASE SETTINGS */
