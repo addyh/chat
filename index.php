@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 	sender_id VARCHAR(64) NULL,
 	sender_color VARCHAR(7) NULL,
 	bubble_position ENUM('left', 'right') NULL,
-	reply_to_id INT NULL
+	reply_to_id INT NULL,
+	sender_name VARCHAR(50) NULL
 )
 ");
 
@@ -280,6 +281,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 	$senderId = $_COOKIE['chat_id'] ?? '';
 	$senderColor = $_COOKIE['chat_color'] ?? '';
 	$bubblePosition = $_COOKIE['chat_position'] ?? '';
+	$senderName = trim($_POST['sender_name'] ?? '');
+
+	if (mb_strlen($senderName) > 50) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
 
 	if (
 		$message === '' ||
@@ -294,13 +301,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
 	$stmt = $pdo->prepare("
 		INSERT INTO chat_messages
-		(message, sender_id, sender_color, bubble_position, reply_to_id)
-		VALUES (?, ?, ?, ?, ?)
+		(message, sender_id, sender_name, sender_color, bubble_position, reply_to_id)
+		VALUES (?, ?, ?, ?, ?, ?)
 	");
 
 	$stmt->execute([
 		$message,
 		$senderId,
+		$senderName,
 		$senderColor,
 		$bubblePosition,
 		$replyToId
@@ -324,6 +332,7 @@ if (($_GET['action'] ?? '') === 'fetch') {
 			m.message,
 			m.created_at,
 			m.sender_id,
+			m.sender_name,
 			m.sender_color,
 			m.bubble_position,
 			m.reply_to_id,
@@ -395,6 +404,7 @@ $initialMessages = $pdo->query("
 		m.message,
 		m.created_at,
 		m.sender_id,
+		m.sender_name,
 		m.sender_color,
 		m.bubble_position,
 		m.reply_to_id,
@@ -540,6 +550,23 @@ body {
 	color: #555;
 	margin-top: 7px;
 	opacity: .7;
+}
+
+.message-name {
+	font-size: 11px;
+	font-weight: bold;
+	opacity: .5;
+	background-color: #fff8;
+	padding: 5px 10px;
+	position: relative;
+	top: -12px;
+	left: -16px;
+	border-radius: 12px 12px 0 0;
+	width: calc(100% + 32px);
+}
+
+.message-name:empty {
+	display: none;
 }
 
 .message-body a {
@@ -975,6 +1002,8 @@ MESSAGE CONTEXT MENU
 				data-reply-to="<?= (int)($msg['reply_to_id'] ?? 0) ?>"
 			>
 
+			<div class="message-name"><?= htmlspecialchars($msg['sender_name'] ?: '', ENT_QUOTES, 'UTF-8') ?></div>
+
 				<?php if (!empty($msg['reply_to_id']) && $msg['reply_message'] !== null): ?>
 
 					<div class="message-reply"
@@ -1249,6 +1278,12 @@ if (!senderId || !/^[a-f0-9]{32}$/.test(senderId)) {
 	senderId = crypto.randomUUID().replace(/-/g, '');
 	setCookie('chat_id', senderId);
 }
+
+
+/* USER DISPLAY NAME */
+
+let senderName = getCookie('chat_name') || '';
+
 
 /* SET RIGHT BUBBLE POSITION */
 
@@ -2193,6 +2228,14 @@ async function loadMessages() {
 
 				}
 
+				/* SENDER NAME */
+
+				const name = document.createElement('div');
+
+				name.className = 'message-name';
+				name.textContent = msg.sender_name || '';
+
+				div.appendChild(name);
 
 				/* MESSAGE BODY */
 
@@ -2511,7 +2554,7 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
-	/* TITLE COMMAND */
+	// TITLE COMMAND
 
 	if (text.toLowerCase().startsWith('/title ')) {
 
@@ -2556,12 +2599,41 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
+	// NAME COMMAND
+
+	if (text.toLowerCase().startsWith('/name')) {
+
+		const newName = text.substring(5).trim();
+
+		if (newName.length > 50) {
+
+			alert('Name must be less than 50 characters.');
+
+			return;
+
+		} else {
+
+			senderName = newName;
+
+			setCookie('chat_name', senderName);
+
+		}
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
 	sendButton.disabled = true;
 
 	const formData = new FormData();
 
 	formData.append('action', 'send');
 	formData.append('message', text);
+	formData.append('sender_name', senderName);
 
 	if (replyToId !== null) {
 		formData.append('reply_to_id', replyToId);
