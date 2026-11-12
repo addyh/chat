@@ -3,8 +3,6 @@
 
 things to fix:
 
- - allow new lines with ctrl+enter and shift+enter, then vertically expand
-    the writing message area for longer lines and new-lined messages
  - changing and changing back screen orientation puts you at a
     random-ass position in the chat
  - being at the bottom of the chat, and being at the bottom of the
@@ -12,6 +10,8 @@ things to fix:
     (while ensuring the up-arrow-upon-page-load showing unread count still works)
  - users want to be able to set a name for themselves
  - /beep needs to make more like a ring, a di-di-beeeeep sound, not just "beeeeeep"
+ - clicking outside of the right-click popup, but still within a message bubble
+    doesn't clear the right-click popup
 
 */
 session_start();
@@ -568,17 +568,29 @@ body {
 	background: white;
 }
 
-.input-area input {
+.input-area textarea {
 	flex: 1;
 	min-width: 0;
-	padding: 14px;
+
+	min-height: 46px;
+	max-height: 180px;
+
+	padding: 13px 16px;
+
 	border: 1px solid #ddd;
-	border-radius: 25px;
+	border-radius: 20px;
+
+	font-family: Arial, sans-serif;
 	font-size: 15px;
+	line-height: 20px;
+
+	resize: none;
+	overflow-y: auto;
+
 	outline: none;
 }
 
-.input-area input:focus {
+.input-area textarea:focus {
 	border-color: #2563eb;
 }
 
@@ -1054,14 +1066,14 @@ MESSAGE CONTEXT MENU
 
 		<div class="composer-row">
 
-			<input
-				type="text"
+			<textarea
 				id="message"
 				placeholder="Write a message..."
 				autocomplete="off"
 				maxlength="5000"
+				rows="1"
 				required
-			>
+			></textarea>
 
 			<button type="submit" id="sendButton">Send</button>
 
@@ -1106,6 +1118,28 @@ let lastTypingSent = 0;
 
 let replyToId = null;
 let selectedMessage = null;
+
+/* =================================
+   AUTO-EXPANDING MESSAGE INPUT
+================================= */
+
+function resizeMessageInput() {
+
+messageInput.style.height = 'auto';
+
+const maxHeight = 180;
+
+messageInput.style.height =
+	Math.min(messageInput.scrollHeight, maxHeight) + 'px';
+
+messageInput.style.overflowY =
+	messageInput.scrollHeight > maxHeight
+	? 'auto'
+	: 'hidden';
+
+}
+
+messageInput.addEventListener('input', resizeMessageInput);
 
 /* COOKIE HELPERS */
 
@@ -1693,6 +1727,38 @@ document.addEventListener('click', function(e) {
 
 });
 
+/* =================================
+   MESSAGE INPUT KEYBOARD CONTROLS
+================================= */
+
+messageInput.addEventListener('keydown', function(e) {
+
+	if (e.key !== 'Enter') return;
+
+	// Ctrl+Enter or Shift+Enter inserts a new line
+	if (e.ctrlKey || e.shiftKey) {
+
+		e.preventDefault();
+
+		const start = this.selectionStart;
+		const end = this.selectionEnd;
+
+		this.setRangeText('\n', start, end, 'end');
+
+		// Trigger resizing and typing notifications
+		this.dispatchEvent(new Event('input', {
+			bubbles: true
+		}));
+
+		return;
+	}
+
+	// Regular Enter sends the message
+	e.preventDefault();
+
+	chatForm.requestSubmit();
+
+});
 
 /* CLOSE MENU ON ESCAPE */
 
@@ -2264,6 +2330,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('chat_position', 'left');
 
 		messageInput.value = '';
+		resizeMessageInput();
 		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
@@ -2276,6 +2343,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('chat_position', 'right');
 
 		messageInput.value = '';
+		resizeMessageInput();
 		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
@@ -2292,6 +2360,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('beep', '1');
 
 		messageInput.value = '';
+		resizeMessageInput();
 		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
@@ -2305,6 +2374,7 @@ chatForm.addEventListener('submit', async function(e) {
 			'beep=; max-age=0; path=/; SameSite=Lax';
 
 		messageInput.value = '';
+		resizeMessageInput();
 		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
@@ -2319,6 +2389,7 @@ chatForm.addEventListener('submit', async function(e) {
 
 		if (!newHeader) {
 			messageInput.value = '';
+			resizeMessageInput();
 			messageInput.dispatchEvent(new Event('input'));
 			return;
 		}
@@ -2348,6 +2419,7 @@ chatForm.addEventListener('submit', async function(e) {
 		}
 
 		messageInput.value = '';
+		resizeMessageInput();
 		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
@@ -2377,6 +2449,7 @@ chatForm.addEventListener('submit', async function(e) {
 		if (result.success) {
 
 			messageInput.value = '';
+			resizeMessageInput();
 			// Notify other users that the input is now empty
 			messageInput.dispatchEvent(new Event('input'));
 			cancelReplyMode();
