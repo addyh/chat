@@ -3,7 +3,6 @@
 
 things to fix:
 
- - / commands leave typing dots showing, need to clear after, ie /beep
  - allow new lines with ctrl+enter and shift+enter, then vertically expand
     the writing message area for longer lines and new-lined messages
  - changing and changing back screen orientation puts you at a
@@ -61,7 +60,29 @@ CREATE TABLE IF NOT EXISTS chat_users (
 )
 ");
 
+/* CREATE SETTINGS TABLE */
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS chat_settings (
+    setting VARCHAR(64) PRIMARY KEY,
+    value TEXT NULL
+)
+");
 
+/* LOAD CUSTOM PAGE HEADER */
+
+$stmt = $pdo->prepare("
+    SELECT value
+    FROM chat_settings
+    WHERE setting = 'page_header'
+");
+
+$stmt->execute();
+
+$customPageHeader = $stmt->fetchColumn();
+
+if ($customPageHeader === false) {
+    $customPageHeader = $page_header;
+}
 
 /* =================================
    UPDATE TYPING STATUS
@@ -158,6 +179,69 @@ if (($_GET['action'] ?? '') === 'typing') {
 		'success' => true,
 		'count' => (int)$result['typing_count'],
 		'active' => (bool)$result['actively_typing']
+	]);
+
+	exit;
+}
+
+/* =================================
+   SET PAGE HEADER
+================================= */
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	($_POST['action'] ?? '') === 'set_header'
+) {
+
+	header('Content-Type: application/json');
+
+	$newHeader = trim($_POST['header'] ?? '');
+
+	if (
+		$newHeader === '' ||
+		mb_strlen($newHeader) > 100
+	) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_settings (setting, value)
+		VALUES ('page_header', ?)
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	");
+
+	$stmt->execute([$newHeader]);
+
+	echo json_encode(['success' => true]);
+	exit;
+}
+
+/* =================================
+   FETCH PAGE HEADER
+================================= */
+
+if (($_GET['action'] ?? '') === 'get_header') {
+
+	header('Content-Type: application/json');
+
+	$stmt = $pdo->prepare("
+		SELECT value
+		FROM chat_settings
+		WHERE setting = 'page_header'
+	");
+
+	$stmt->execute();
+
+	$header = $stmt->fetchColumn();
+
+	if ($header === false) {
+		$header = $page_header;
+	}
+
+	echo json_encode([
+		'success' => true,
+		'header' => $header
 	]);
 
 	exit;
@@ -863,7 +947,7 @@ MESSAGE CONTEXT MENU
 	<div class="header">
 		<div class="header-content">
 			<div class="header-text">
-				<h3><?= htmlspecialchars($page_header) ?></h3>
+			<h3 id="pageHeader"><?= htmlspecialchars($customPageHeader, ENT_QUOTES, 'UTF-8') ?></h3>
 				<div class="status"><?= htmlspecialchars($page_status) ?></div>
 				<div class="online-count">
 					<span class="online-indicator"></span>
@@ -2163,7 +2247,6 @@ updateTypingIndicator();
 
 setInterval(updateTypingIndicator, 1000);
 
-
 /* SEND MESSAGE */
 
 chatForm.addEventListener('submit', async function(e) {
@@ -2181,6 +2264,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('chat_position', 'left');
 
 		messageInput.value = '';
+		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
 		return;
@@ -2192,6 +2276,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('chat_position', 'right');
 
 		messageInput.value = '';
+		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
 		return;
@@ -2207,6 +2292,7 @@ chatForm.addEventListener('submit', async function(e) {
 		setCookie('beep', '1');
 
 		messageInput.value = '';
+		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
 		return;
@@ -2219,6 +2305,50 @@ chatForm.addEventListener('submit', async function(e) {
 			'beep=; max-age=0; path=/; SameSite=Lax';
 
 		messageInput.value = '';
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	/* TITLE COMMAND */
+
+	if (text.toLowerCase().startsWith('/title ')) {
+
+		const newHeader = text.substring(7).trim();
+
+		if (!newHeader) {
+			messageInput.value = '';
+			messageInput.dispatchEvent(new Event('input'));
+			return;
+		}
+
+		const formData = new FormData();
+
+		formData.append('action', 'set_header');
+		formData.append('header', newHeader);
+
+		try {
+
+			const response = await fetch('', {
+				method: 'POST',
+				body: formData
+			});
+
+			const result = await response.json();
+
+			if (result.success) {
+				document.getElementById('pageHeader').textContent = newHeader;
+			} else {
+				alert('Unable to change page heading.');
+			}
+
+		} catch (error) {
+			alert('Unable to change page heading.');
+		}
+
+		messageInput.value = '';
+		messageInput.dispatchEvent(new Event('input'));
 		messageInput.focus();
 
 		return;
@@ -2313,6 +2443,45 @@ updateOnlineCount();
 
 // Update every 2 seconds
 setInterval(updateOnlineCount, 1000);
+
+
+/* =================================
+   SYNCHRONIZE PAGE HEADER
+================================= */
+
+async function updatePageHeader() {
+
+	try {
+
+		const response = await fetch('?action=get_header');
+
+		if (!response.ok) return;
+
+		const data = await response.json();
+
+		if (data.success) {
+
+			const header = document.getElementById('pageHeader');
+
+			if (header && header.textContent !== data.header) {
+				header.textContent = data.header;
+			}
+
+		}
+
+	} catch (error) {
+
+		console.error('Page header update failed:', error);
+
+	}
+
+}
+
+// Check immediately
+updatePageHeader();
+
+// Check every second
+setInterval(updatePageHeader, 1000);
 
 </script>
 
