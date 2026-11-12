@@ -3,9 +3,6 @@
 
 things to fix:
 
- - being at the bottom of the chat, and being at the bottom of the
-    scroll-down-button history stack needs to both hide the down-arrow button
-    (while ensuring the up-arrow-upon-page-load showing unread count still works)
  - users want to be able to set a name for themselves
  - /beep needs to make more like a ring, a di-di-beeeeep sound, not just "beeeeeep"
  - clicking outside of the right-click popup, but still within a message bubble
