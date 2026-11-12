@@ -1,4 +1,20 @@
 <?php
+/*
+
+things to fix:
+
+ - / commands leave typing dots showing, need to clear after, ie /beep
+ - allow new lines with ctrl+enter and shift+enter, then vertically expand
+    the writing message area for longer lines and new-lined messages
+ - changing and changing back screen orientation puts you at a
+    random-ass position in the chat
+ - being at the bottom of the chat, and being at the bottom of the
+    scroll-down-button history stack needs to both hide the down-arrow button
+    (while ensuring the up-arrow-upon-page-load showing unread count still works)
+ - users want to be able to set a name for themselves
+ - /beep needs to make more like a ring, a di-di-beeeeep sound, not just "beeeeeep"
+
+*/
 session_start();
 
 /* DATABASE SETTINGS */
@@ -733,6 +749,18 @@ MESSAGE CONTEXT MENU
 	outline-offset: 3px;
 }
 
+.arrow-up {
+    display: none;
+}
+
+.new-messages-button.initial-unread .arrow-down {
+    display: none;
+}
+
+.new-messages-button.initial-unread .arrow-up {
+    display: block;
+}
+
 /* =================================
    THREE DOT TYPING BUBBLE
 ================================= */
@@ -909,8 +937,9 @@ MESSAGE CONTEXT MENU
 	>
 
 		<svg viewBox="0 0 24 24" aria-hidden="true">
-			<path d="M12 5v14"></path>
-			<path d="m19 12-7 7-7-7"></path>
+			<path class="arrow-line" d="M12 5v14"></path>
+			<path class="arrow-down" d="m19 12-7 7-7-7"></path>
+			<path class="arrow-up" d="m5 12 7-7 7 7"></path>
 		</svg>
 
 		<span class="unread-count" id="unreadCount">0</span>
@@ -1152,6 +1181,7 @@ const BOTTOM_THRESHOLD = 32;
 
 let unreadMessages = 0;
 let scrollHistory = [];
+let firstUnreadMessage = null;
 
 
 /* CHECK WHETHER USER IS AT BOTTOM */
@@ -1171,7 +1201,15 @@ function isAtBottom() {
 
 function scrollToBottom() {
 
-	messages.scrollTop = messages.scrollHeight;
+	requestAnimationFrame(() => {
+
+		messages.scrollTop = messages.scrollHeight;
+
+		requestAnimationFrame(() => {
+			messages.scrollTop = messages.scrollHeight;
+		});
+
+	});
 
 }
 
@@ -1217,30 +1255,101 @@ function updateUnreadIndicator() {
 function clearUnreadMessages() {
 
 	unreadMessages = 0;
+	firstUnreadMessage = null;
 
 	updateUnreadIndicator();
 
 }
 
+/* COUNT INITIAL MESSAGES FROM THE OTHER SIDE */
+
+function countInitialUnreadMessages() {
+
+	const otherSide = bubblePosition === 'right' ? 'left' : 'right';
+
+	const allMessages = messages.querySelectorAll('.message');
+
+	unreadMessages = 0;
+	firstUnreadMessage = null;
+
+	// Find the first unread message from the other person
+	let lastOwnMessageIndex = -1;
+
+	for (let i = allMessages.length - 1; i >= 0; i--) {
+
+		if (allMessages[i].dataset.position === bubblePosition) {
+			lastOwnMessageIndex = i;
+			break;
+		}
+
+	}
+
+	// Everything from the other person after your last message is unread
+	for (let i = lastOwnMessageIndex + 1; i < allMessages.length; i++) {
+
+		if (allMessages[i].dataset.position === otherSide) {
+
+			unreadMessages++;
+
+			if (!firstUnreadMessage) {
+				firstUnreadMessage = allMessages[i];
+			}
+
+		}
+
+	}
+
+	unreadCountDisplay.textContent = unreadMessages;
+	unreadCountDisplay.hidden = unreadMessages === 0;
+
+	newMessagesButton.hidden = unreadMessages === 0;
+
+	newMessagesButton.classList.toggle(
+		'initial-unread',
+		unreadMessages > 0
+	);
+
+}
 
 /* SCROLL BUTTON CLICK */
 
 newMessagesButton.addEventListener('click', function() {
 
-	goBackToPreviousScroll();
+	if (firstUnreadMessage) {
+
+		firstUnreadMessage.scrollIntoView({
+			behavior: 'smooth',
+			block: 'start'
+		});
+
+	} else {
+
+		scrollToBottom();
+
+	}
+
+	clearUnreadMessages();
+
+	newMessagesButton.classList.remove('initial-unread');
 
 });
 
 
 /* DETECT MANUAL SCROLLING */
 
+let initialUnreadCount = true;
+
 messages.addEventListener('scroll', function() {
 
 	if (isAtBottom()) {
 
-		clearUnreadMessages();
+		if (!initialUnreadCount) {
+			clearUnreadMessages();
+		}
 
 	} else {
+
+		initialUnreadCount = false;
 
 		updateUnreadIndicator();
 
@@ -1840,6 +1949,17 @@ async function loadMessages() {
 
 				messages.insertBefore(div, typingBubble);
 
+				if (
+					!wasAtBottom &&
+					msg.sender_id !== senderId
+				) {
+
+					if (!firstUnreadMessage) {
+						firstUnreadMessage = div;
+					}
+
+				}
+
 				lastId = Math.max(lastId, Number(msg.id));
 
 			});
@@ -1860,21 +1980,19 @@ async function loadMessages() {
 
 				scrollToBottom();
 
-				clearUnreadMessages();
-
 			} else {
 
-				// Preserve current scroll position
 				messages.scrollTop = previousScrollTop;
 
-				// Only count messages sent by OTHER people
+				const otherSide = bubblePosition === 'right' ? 'left' : 'right';
+
 				const incomingMessages = data.filter(msg =>
 					msg.sender_id !== senderId
 				);
 
+
 				unreadMessages += incomingMessages.length;
 
-				// Keep button visible even when unread count is zero
 				updateUnreadIndicator();
 
 			}
@@ -2152,6 +2270,10 @@ chatForm.addEventListener('submit', async function(e) {
 
 setInterval(loadMessages, 1000);
 
+
+/* COUNT INITIAL UNREAD MESSAGES */
+
+countInitialUnreadMessages();
 
 /* SCROLL TO LATEST MESSAGE ON OPEN */
 
