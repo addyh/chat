@@ -695,6 +695,10 @@ body {
 	display: none !important;
 }
 
+#upMessagesButton:not([hidden]) ~ #downMessagesButton {
+	display: none !important;
+}
+
 /* =================================
 REPLY PREVIEW INSIDE MESSAGES
 ================================= */
@@ -841,18 +845,6 @@ MESSAGE CONTEXT MENU
 .message.reply-highlight {
 	outline: 2px solid #2563eb;
 	outline-offset: 3px;
-}
-
-.arrow-up {
-    display: none;
-}
-
-.new-messages-button.initial-unread .arrow-down {
-    display: none;
-}
-
-.new-messages-button.initial-unread .arrow-up {
-    display: block;
 }
 
 /* =================================
@@ -1025,24 +1017,42 @@ MESSAGE CONTEXT MENU
 
 	</div>
 
-	<!-- NEW MESSAGE BUTTON -->
+	<!-- UP ARROW: JUMP TO FIRST UNREAD MESSAGE -->
 
 	<button
 		type="button"
 		class="new-messages-button"
-		id="newMessagesButton"
+		id="upMessagesButton"
+		aria-label="Jump to first unread message"
+		title="Jump to first unread message"
+		hidden
+	>
+
+		<svg viewBox="0 0 24 24" aria-hidden="true">
+			<path d="M12 19V5"></path>
+			<path d="m5 12 7-7 7 7"></path>
+		</svg>
+
+		<span class="unread-count" id="unreadCount">0</span>
+
+	</button>
+
+
+	<!-- DOWN ARROW: SCROLL TO BOTTOM -->
+
+	<button
+		type="button"
+		class="new-messages-button"
+		id="downMessagesButton"
 		aria-label="Scroll to latest messages"
 		title="Scroll to latest messages"
 		hidden
 	>
 
 		<svg viewBox="0 0 24 24" aria-hidden="true">
-			<path class="arrow-line" d="M12 5v14"></path>
-			<path class="arrow-down" d="m19 12-7 7-7-7"></path>
-			<path class="arrow-up" d="m5 12 7-7 7 7"></path>
+			<path d="M12 5v14"></path>
+			<path d="m5 12 7 7 7-7"></path>
 		</svg>
-
-		<span class="unread-count" id="unreadCount">0</span>
 
 	</button>
 
@@ -1105,7 +1115,8 @@ const messageInput = document.getElementById('message');
 const chatForm = document.getElementById('chatForm');
 const sendButton = document.getElementById('sendButton');
 const bubbleColorPicker = document.getElementById('bubbleColor');
-const newMessagesButton = document.getElementById('newMessagesButton');
+const upMessagesButton = document.getElementById('upMessagesButton');
+const downMessagesButton = document.getElementById('downMessagesButton');
 const unreadCountDisplay = document.getElementById('unreadCount');
 const replyPreview = document.getElementById('replyPreview');
 const replyPreviewTitle = document.getElementById('replyPreviewTitle');
@@ -1429,7 +1440,11 @@ function scrollToBottom() {
 		messages.scrollTop = messages.scrollHeight;
 
 		requestAnimationFrame(() => {
+
 			messages.scrollTop = messages.scrollHeight;
+
+			updateUnreadIndicator();
+
 		});
 
 	});
@@ -1463,12 +1478,14 @@ function goBackToPreviousScroll() {
 
 function updateUnreadIndicator() {
 
-	// Show arrow if there is scroll history OR the user isn't at bottom
-	newMessagesButton.hidden = scrollHistory.length === 0 && isAtBottom();
+	// Up arrow depends ONLY on unread messages
+	upMessagesButton.hidden = unreadMessages === 0;
 
+	// Down arrow depends ONLY on scroll position
+	downMessagesButton.hidden = isAtBottom();
+
+	// Update unread count
 	unreadCountDisplay.textContent = unreadMessages;
-
-	unreadCountDisplay.hidden = unreadMessages === 0;
 
 }
 
@@ -1495,7 +1512,7 @@ function countInitialUnreadMessages() {
 	unreadMessages = 0;
 	firstUnreadMessage = null;
 
-	// Find the first unread message from the other person
+	// Find the last message sent by yourself
 	let lastOwnMessageIndex = -1;
 
 	for (let i = allMessages.length - 1; i >= 0; i--) {
@@ -1507,7 +1524,7 @@ function countInitialUnreadMessages() {
 
 	}
 
-	// Everything from the other person after your last message is unread
+	// Count messages from the other person after your last message
 	for (let i = lastOwnMessageIndex + 1; i < allMessages.length; i++) {
 
 		if (allMessages[i].dataset.position === otherSide) {
@@ -1522,38 +1539,33 @@ function countInitialUnreadMessages() {
 
 	}
 
-	unreadCountDisplay.textContent = unreadMessages;
-	unreadCountDisplay.hidden = unreadMessages === 0;
-
-	newMessagesButton.hidden = unreadMessages === 0;
-
-	newMessagesButton.classList.toggle(
-		'initial-unread',
-		unreadMessages > 0
-	);
+	updateUnreadIndicator();
 
 }
 
-/* SCROLL BUTTON CLICK */
+/* UP ARROW CLICK: JUMP TO FIRST UNREAD MESSAGE */
 
-newMessagesButton.addEventListener('click', function() {
+upMessagesButton.addEventListener('click', function() {
 
-	if (firstUnreadMessage) {
+	if (!firstUnreadMessage) return;
 
-		firstUnreadMessage.scrollIntoView({
-			behavior: 'smooth',
-			block: 'start'
-		});
-
-	} else {
-
-		scrollToBottom();
-
-	}
+	const target = firstUnreadMessage;
 
 	clearUnreadMessages();
 
-	newMessagesButton.classList.remove('initial-unread');
+	target.scrollIntoView({
+		behavior: 'smooth',
+		block: 'start'
+	});
+
+});
+
+
+/* DOWN ARROW CLICK: SCROLL TO BOTTOM */
+
+downMessagesButton.addEventListener('click', function() {
+
+	goBackToPreviousScroll();
 
 });
 
@@ -1567,8 +1579,12 @@ messages.addEventListener('scroll', function() {
 	// Remember position for orientation changes
 	saveScrollAnchor();
 
+	// Always update the down arrow based on scroll position
+	downMessagesButton.hidden = isAtBottom();
+
 	if (isAtBottom()) {
 
+		// Don't clear initial unread messages on page load
 		if (!initialUnreadCount) {
 			clearUnreadMessages();
 		}
@@ -2585,6 +2601,10 @@ setInterval(loadMessages, 1000);
 /* COUNT INITIAL UNREAD MESSAGES */
 
 countInitialUnreadMessages();
+
+/* INITIALIZE SCROLL BUTTON VISIBILITY */
+
+updateUnreadIndicator();
 
 /* SCROLL TO LATEST MESSAGE ON OPEN */
 
