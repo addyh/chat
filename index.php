@@ -4,9 +4,6 @@
 things to fix:
 
  - users want to be able to set a name for themselves
- - /beep needs to make more like a ring, a di-di-beeeeep sound, not just "beeeeeep"
- - clicking outside of the right-click popup, but still within a message bubble
-    doesn't clear the right-click popup
 
 */
 session_start();
@@ -1174,11 +1171,21 @@ function setCookie(name, value) {
 	document.cookie = cookie;
 }
 
+
+
 /* =================================
    BEEP NOTIFICATIONS
 ================================= */
 
 let beepAudioContext = null;
+
+/* RING SETTINGS */
+
+const beepSettings = [
+	{ tone: 900,  length: 50, volume: 1, gap: 100 },
+	{ tone: 900,  length: 50, volume: 1, gap: 100 },
+	{ tone: 1200, length: 500, volume: 1 }
+];
 
 function isBeepEnabled() {
 	return getCookie('beep') == '1';
@@ -1197,28 +1204,35 @@ function playBeep() {
 			)();
 		}
 
-		if (beepAudioContext.state === 'suspended') {
-			beepAudioContext.resume();
-		}
+		let startTime = beepAudioContext.currentTime;
 
-		const oscillator = beepAudioContext.createOscillator();
-		const gain = beepAudioContext.createGain();
+		beepSettings.forEach(beep => {
 
-		oscillator.type = 'sine';
-		oscillator.frequency.value = 1000;
+			const oscillator = beepAudioContext.createOscillator();
+			const gain = beepAudioContext.createGain();
 
-		gain.gain.setValueAtTime(0.5, beepAudioContext.currentTime);
-		gain.gain.setValueAtTime(0.5, beepAudioContext.currentTime + 0.4);
-		gain.gain.exponentialRampToValueAtTime(
-			0.001,
-			beepAudioContext.currentTime + 0.5
-		);
+			const duration = beep.length / 1000;
 
-		oscillator.connect(gain);
-		gain.connect(beepAudioContext.destination);
+			oscillator.type = 'square';
+			oscillator.frequency.value = beep.tone;
 
-		oscillator.start();
-		oscillator.stop(beepAudioContext.currentTime + 0.5);
+			gain.gain.setValueAtTime(beep.volume, startTime);
+
+			gain.gain.exponentialRampToValueAtTime(
+				0.001,
+				startTime + duration
+			);
+
+			oscillator.connect(gain);
+			gain.connect(beepAudioContext.destination);
+
+			oscillator.start(startTime);
+			oscillator.stop(startTime + duration);
+
+			// Include this beep's individual gap
+			startTime += duration + (beep.gap ?? 0) / 1000;
+
+		});
 
 	} catch (error) {
 		console.error('Beep notification failed:', error);
@@ -1837,13 +1851,8 @@ contextCopy.addEventListener('click', async function() {
 
 document.addEventListener('click', function(e) {
 
-	if (
-		!contextMenu.contains(e.target) &&
-		!e.target.closest('.message')
-	) {
-
+	if (!contextMenu.contains(e.target)) {
 		closeContextMenu();
-
 	}
 
 });
