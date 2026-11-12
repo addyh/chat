@@ -324,6 +324,7 @@ if (($_GET['action'] ?? '') === 'fetch') {
 			m.id,
 			m.message,
 			m.created_at,
+			UNIX_TIMESTAMP(m.created_at) AS created_at_unix,
 			m.sender_id,
 			m.sender_name,
 			m.sender_color,
@@ -397,6 +398,7 @@ $initialMessages = $pdo->query("
 		m.id,
 		m.message,
 		m.created_at,
+		UNIX_TIMESTAMP(m.created_at) AS created_at_unix,
 		m.sender_id,
 		m.sender_name,
 		m.sender_color,
@@ -715,6 +717,10 @@ body {
 	display: none !important;
 }
 
+.message:has(.message-name[hidden]) {
+	margin-top: -10px;
+}
+
 /* =================================
 REPLY PREVIEW INSIDE MESSAGES
 ================================= */
@@ -987,17 +993,42 @@ MESSAGE CONTEXT MENU
 
 	<div class="messages" id="messages">
 
+		<?php $previousMessage = null; ?>
 		<?php foreach ($initialMessages as $msg): ?>
+			<?php
+
+			$hideSenderName = false;
+
+			if ($previousMessage !== null) {
+
+				$sameSender =
+					$previousMessage['sender_id'] === $msg['sender_id'] &&
+					$previousMessage['sender_name'] === $msg['sender_name'] &&
+					$previousMessage['bubble_position'] === $msg['bubble_position'];
+
+				$timeDifference =
+					strtotime($msg['created_at']) -
+					strtotime($previousMessage['created_at']);
+
+				$hideSenderName =
+					$sameSender &&
+					$timeDifference >= 0 &&
+					$timeDifference <= 60;
+			}
+
+			?>
 
 			<div class="message"
 				data-id="<?= (int)$msg['id'] ?>"
 				data-sender-id="<?= htmlspecialchars($msg['sender_id'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+				data-sender-name="<?= htmlspecialchars($msg['sender_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
 				data-color="<?= htmlspecialchars($msg['sender_color'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
 				data-position="<?= htmlspecialchars($msg['bubble_position'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+				data-created-at="<?= (int)$msg['created_at_unix'] ?>"
 				data-reply-to="<?= (int)($msg['reply_to_id'] ?? 0) ?>"
 			>
 
-			<div class="message-name"><?= htmlspecialchars($msg['sender_name'] ?: '', ENT_QUOTES, 'UTF-8') ?></div>
+			<div class="message-name" <?= $hideSenderName ? 'hidden' : '' ?>><?= htmlspecialchars($msg['sender_name'] ?: '', ENT_QUOTES, 'UTF-8') ?></div>
 
 				<?php if (!empty($msg['reply_to_id']) && $msg['reply_message'] !== null): ?>
 
@@ -1025,6 +1056,7 @@ MESSAGE CONTEXT MENU
 				<small><?= htmlspecialchars($msg['created_at']) ?></small>
 			</div>
 
+			<?php $previousMessage = $msg; ?>
 		<?php endforeach; ?>
 
 		<!-- TYPING BUBBLE -->
@@ -2195,9 +2227,11 @@ async function loadMessages() {
 				div.className = 'message';
 				div.dataset.id = msg.id;
 				div.dataset.senderId = msg.sender_id || '';
+				div.dataset.senderName = msg.sender_name || '';
 				div.dataset.color = msg.sender_color || '';
 				div.dataset.position = msg.bubble_position || '';
 				div.dataset.replyTo = msg.reply_to_id || '0';
+				div.dataset.createdAt = msg.created_at_unix;
 
 				// Play notification only for messages from other people
 				if (msg.sender_id !== senderId) {
@@ -2210,6 +2244,33 @@ async function loadMessages() {
 
 				name.className = 'message-name';
 				name.textContent = msg.sender_name || '';
+
+				const existingMessages = messages.querySelectorAll('.message');
+
+				const previousMessage = existingMessages.length
+					? existingMessages[existingMessages.length - 1]
+					: null;
+
+				let hideSenderName = false;
+
+				if (previousMessage) {
+
+					const sameSender =
+						previousMessage.dataset.senderId === (msg.sender_id || '') &&
+						previousMessage.dataset.senderName === (msg.sender_name || '') &&
+						previousMessage.dataset.position === (msg.bubble_position || '');
+
+					const timeDifference =
+						Number(msg.created_at_unix) -
+						Number(previousMessage.dataset.createdAt);
+
+					hideSenderName =
+						sameSender &&
+						timeDifference >= 0 &&
+						timeDifference <= 60;
+				}
+
+				name.hidden = hideSenderName;
 
 				div.appendChild(name);
 
