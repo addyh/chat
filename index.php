@@ -428,7 +428,7 @@ $initialMessages = $pdo->query("
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title><?= htmlspecialchars($page_title) ?></title>
 
 <style>
@@ -936,9 +936,15 @@ MESSAGE CONTEXT MENU
 @media(max-width: 600px) {
 
 	.chat-container {
+		height: 100vh;
 		height: 100dvh;
+		min-height: 0;
 		margin: 0;
 		border-radius: 0;
+	}
+
+	.messages {
+		min-height: 0;
 	}
 
 	.new-messages-button {
