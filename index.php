@@ -2789,6 +2789,11 @@ chatForm.addEventListener('submit', async function(e) {
 		text.toLowerCase() === '/help'
 	) {
 
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
 		alert(
 			'/help\n' +
 			'Display this command list.\n\n' +
@@ -2803,11 +2808,6 @@ chatForm.addEventListener('submit', async function(e) {
 			'Enable/disable sound notifications for you.\n\n'
 		);
 
-		messageInput.value = '';
-		resizeMessageInput();
-		messageInput.dispatchEvent(new Event('input'));
-		messageInput.focus();
-
 		return;
 	}
 
@@ -2815,6 +2815,11 @@ chatForm.addEventListener('submit', async function(e) {
 		text.toLowerCase() === '/help admin' ||
 		text.toLowerCase() === '/help addy'
 	) {
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
 
 		alert(
 			'/help admin\n' +
@@ -2841,11 +2846,6 @@ chatForm.addEventListener('submit', async function(e) {
 			'/refresh\n' +
 			'Refresh everyone\'s chat page.\n\n'
 		);
-
-		messageInput.value = '';
-		resizeMessageInput();
-		messageInput.dispatchEvent(new Event('input'));
-		messageInput.focus();
 
 		return;
 	}
