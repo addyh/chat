@@ -3,10 +3,12 @@
 
 to do:
 
+ - easter egg commands
  - emoji reactions
  - stickers
  - phone notifications
  - system messages
+ - make games together that play on here
 
 */
 session_start();
