@@ -2994,6 +2994,10 @@ chatForm.addEventListener('submit', async function(e) {
 				resizeMessageInput();
 				messageInput.dispatchEvent(new Event('input'));
 
+				if (document.activeElement === messageInput) {
+					sessionStorage.setItem('restoreChatFocus', '1');
+				}
+
 				// Refresh this user's chat immediately
 				location.reload();
 
@@ -3346,6 +3350,10 @@ async function checkShowLimit() {
 
 		// Another user has changed the history limit
 		if (Number(data.limit) !== initialShowLimit) {
+
+			if (document.activeElement === messageInput) {
+				sessionStorage.setItem('restoreChatFocus', '1');
+			}
 
 			location.reload();
 
