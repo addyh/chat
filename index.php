@@ -105,6 +105,18 @@ if ($showLimit === false || !ctype_digit((string)$showLimit)) {
 	$showLimit = max(0, min(50000, (int)$showLimit));
 }
 
+/* LOAD SLEEP MODE */
+$stmt = $pdo->prepare("
+	SELECT value
+	FROM chat_settings
+	WHERE setting = 'sleep_mode'
+");
+$stmt->execute();
+$sleepMode = $stmt->fetchColumn();
+if ($sleepMode === '1') {
+	$customPageHeader = '';
+}
+
 /* =================================
    UPDATE TYPING STATUS
 ================================= */
@@ -245,23 +257,9 @@ if (($_GET['action'] ?? '') === 'get_header') {
 
 	header('Content-Type: application/json');
 
-	$stmt = $pdo->prepare("
-		SELECT value
-		FROM chat_settings
-		WHERE setting = 'page_header'
-	");
-
-	$stmt->execute();
-
-	$header = $stmt->fetchColumn();
-
-	if ($header === false) {
-		$header = $page_header;
-	}
-
 	echo json_encode([
 		'success' => true,
-		'header' => $header
+		'header' => $customPageHeader
 	]);
 
 	exit;
@@ -307,23 +305,9 @@ if (($_GET['action'] ?? '') === 'get_title') {
 
 	header('Content-Type: application/json');
 
-	$stmt = $pdo->prepare("
-		SELECT value
-		FROM chat_settings
-		WHERE setting = 'page_title'
-	");
-
-	$stmt->execute();
-
-	$title = $stmt->fetchColumn();
-
-	if ($title === false) {
-		$title = $page_title;
-	}
-
 	echo json_encode([
 		'success' => true,
-		'title' => $title
+		'title' => $customPageTitle
 	]);
 
 	exit;
@@ -444,6 +428,75 @@ if (
 	$stmt->execute([(string)microtime(true)]);
 
 	echo json_encode(['success' => true]);
+
+	exit;
+}
+
+/* =================================
+   SET SLEEP MODE
+================================= */
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	in_array($_POST['action'] ?? '', ['set_sleep_mode'], true)
+) {
+
+	header('Content-Type: application/json');
+
+	$sleepMode = $_POST['value'] ?? '';
+
+	if (!in_array($sleepMode, ['0', '1'], true)) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_settings (setting, value)
+		VALUES ('sleep_mode', ?)
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	");
+	$stmt->execute([$sleepMode]);
+
+	if ($sleepMode === '1') {
+		$newLimit = (int)$showLimit;
+		$stmt = $pdo->prepare("
+			INSERT INTO chat_settings (setting, value)
+			VALUES ('show_limit_prev', ?)
+			ON DUPLICATE KEY UPDATE value = VALUES(value)
+		");
+		$stmt->execute([$newLimit]);
+		$stmt2 = $pdo->prepare("
+			INSERT INTO chat_settings (setting, value)
+			VALUES ('show_limit', ?)
+			ON DUPLICATE KEY UPDATE value = VALUES(value)
+		");
+		$stmt2->execute(['0']);
+	} else {
+
+		$stmt = $pdo->prepare("
+			SELECT value
+			FROM chat_settings
+			WHERE setting = 'show_limit_prev'
+		");
+		$stmt->execute();
+		$previousLimit = $stmt->fetchColumn();
+		if ($previousLimit !== false && ctype_digit((string)$previousLimit)) {
+
+			$stmt = $pdo->prepare("
+				INSERT INTO chat_settings (setting, value)
+				VALUES ('show_limit', ?)
+				ON DUPLICATE KEY UPDATE value = VALUES(value)
+			");
+
+			$stmt->execute([$previousLimit]);
+
+		}
+	}
+
+	echo json_encode([
+		'success' => true,
+		'sleep_mode' => (int)$sleepMode
+	]);
 
 	exit;
 }
@@ -648,6 +701,85 @@ $initialMessages = $pdo->query("
 <title><?= htmlspecialchars($customPageTitle) ?></title>
 
 <style>
+/* =================================
+   LIGHT MODE (DEFAULT)
+================================= */
+
+:root {
+
+	--page-bg: #e9edf3;
+	--container-bg: #ffffff;
+	--header-bg: #2563eb;
+	--header-text: #ffffff;
+
+	--messages-bg: #f7f8fa;
+
+	--text-color: #222222;
+	--muted-text: #666666;
+
+	--border-color: #dddddd;
+
+	--input-bg: #ffffff;
+	--input-text: #222222;
+	--input-border: #dddddd;
+
+	--message-text: #222222;
+	--message-meta: #555555;
+
+	--reply-bg: #0000000d;
+	--reply-accent: #2563eb;
+
+	--button-bg: #2563eb;
+	--button-text: #ffffff;
+
+	--menu-bg: #ffffff;
+	--menu-hover: #f0f3f8;
+
+	--typing-bg: #e5e7eb;
+	--typing-dot: #777777;
+
+}
+
+
+/* =================================
+DARK MODE
+================================= */
+
+body.dark-mode {
+
+	--page-bg: #000;
+	--container-bg: #1f2937;
+	--header-bg: #111827;
+	--header-text: #f9fafb;
+
+	--messages-bg: #18212f;
+
+	--text-color: #f3f4f6;
+	--muted-text: #9ca3af;
+
+	--border-color: #374151;
+
+	--input-bg: #273449;
+	--input-text: #f9fafb;
+	--input-border: #4b5563;
+
+	--message-text: #f9fafb;
+	--message-meta: #d1d5db;
+
+	--reply-bg: #ffffff12;
+	--reply-accent: #60a5fa;
+
+	--button-bg: #3b82f6;
+	--button-text: #ffffff;
+
+	--menu-bg: #273449;
+	--menu-hover: #374151;
+
+	--typing-bg: #374151;
+	--typing-dot: #d1d5db;
+
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -655,14 +787,13 @@ $initialMessages = $pdo->query("
 body {
 	margin: 0;
 	font-family: Arial, sans-serif;
-	background: #e9edf3;
+	background-color: #e9edf3;
 }
 
 .chat-container {
 	max-width: 750px;
 	height: 95vh;
 	margin: 2.5vh auto;
-	background: white;
 	display: flex;
 	flex-direction: column;
 	border-radius: 12px;
@@ -672,7 +803,7 @@ body {
 }
 
 .header {
-	background: #2563eb;
+	background-color: #2563eb;
 	color: white;
 	padding: 15px 20px;
 }
@@ -706,7 +837,7 @@ body {
 .online-indicator {
 	width: 7px;
 	height: 7px;
-	background: #4ade80;
+	background-color: #4ade80;
 	border-radius: 50%;
 	box-shadow: 0 0 5px #4ade80;
 }
@@ -721,7 +852,7 @@ body {
 	height: 30px;
 	padding: 0;
 	border: 2px solid white;
-	background: transparent;
+	background-color: transparent;
 	cursor: pointer;
 }
 
@@ -729,7 +860,7 @@ body {
 	flex: 1;
 	overflow-y: auto;
 	padding: 20px;
-	background: #f7f8fa;
+	background-color: #f7f8fa;
 	overscroll-behavior: contain;
 	overflow-anchor: none;
 }
@@ -796,7 +927,7 @@ body {
 	padding: 15px;
 	gap: 10px;
 	border-top: 1px solid #ddd;
-	background: white;
+	background-color: white;
 }
 
 .input-area textarea {
@@ -828,7 +959,7 @@ body {
 .input-area button {
 	padding: 0 25px;
 	border-radius: 25px;
-	background: #2563eb;
+	background-color: #2563eb;
 	color: white;
 	border: none;
 	font-size: 15px;
@@ -860,7 +991,7 @@ body {
 	border: none;
 	border-radius: 50%;
 
-	background: #2563eb;
+	background-color: #2563eb;
 	color: white;
 
 	box-shadow: 0 3px 12px #0003;
@@ -875,7 +1006,7 @@ body {
 }
 
 .new-messages-button:hover {
-	background: #1d4ed8;
+	background-color: #1d4ed8;
 	transform: translateY(-2px);
 }
 
@@ -911,7 +1042,7 @@ body {
 
 	border-radius: 20px;
 
-	background: #ef4444;
+	background-color: #ef4444;
 	color: white;
 
 	border: 2px solid white;
@@ -947,7 +1078,7 @@ REPLY PREVIEW INSIDE MESSAGES
 	border-left: 4px solid #2563eb;
 	border-radius: 5px;
 
-	background: #0000000d;
+	background-color: #0000000d;
 
 	cursor: pointer;
 	overflow: hidden;
@@ -992,7 +1123,7 @@ REPLY COMPOSER
 
 	padding: 9px 12px;
 
-	background: #f0f4ff;
+	background-color: #f0f4ff;
 	border-left: 4px solid #2563eb;
 	border-radius: 7px;
 	width: calc(100% - 60px);
@@ -1022,7 +1153,7 @@ REPLY COMPOSER
 
 button.cancel-reply {
 	border: none;
-	background: transparent;
+	background-color: transparent;
 	color: #666;
 	font-size: 21px;
 	cursor: pointer;
@@ -1041,7 +1172,7 @@ MESSAGE CONTEXT MENU
 
 	padding: 5px;
 
-	background: white;
+	background-color: white;
 	border-radius: 9px;
 
 	box-shadow: 0 4px 20px #0003;
@@ -1060,7 +1191,7 @@ MESSAGE CONTEXT MENU
 	border: none;
 	border-radius: 5px;
 
-	background: white;
+	background-color: white;
 	color: #222;
 
 	font-size: 14px;
@@ -1070,7 +1201,7 @@ MESSAGE CONTEXT MENU
 }
 
 .message-context-menu button:hover {
-	background: #f0f3f8;
+	background-color: #f0f3f8;
 }
 
 .message.dragging {
@@ -1099,7 +1230,7 @@ MESSAGE CONTEXT MENU
 	padding: 13px 17px;
 	margin-bottom: 12px;
 
-	background: #e5e7eb;
+	background-color: #e5e7eb;
 
 	border-radius: 12px;
 	border-bottom-left-radius: 4px;
@@ -1117,7 +1248,7 @@ MESSAGE CONTEXT MENU
 	width: 7px;
 	height: 7px;
 
-	background: #777;
+	background-color: #777;
 
 	border-radius: 50%;
 
@@ -1182,10 +1313,119 @@ MESSAGE CONTEXT MENU
 	}
 
 }
+
+/* SLEEP MODE */
+body.sleep-mode .header {
+	display: none;
+}
+body.sleep-mode,
+body.sleep-mode .messages,
+body.sleep-mode .input-area {
+	background-color: black;
+	border: none;
+}
+body.sleep-mode textarea#message {
+	background-color: #111;
+	border: 0;
+	color: white;
+}
+body.sleep-mode button#sendButton {
+	background-color: #111;
+}
+
+/* NIGHT MODE */
+body.dark-mode .message {
+	position: relative;
+	isolation: isolate;
+}
+body.dark-mode .message::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: inherit;
+	filter: brightness(0.3);
+	border-radius: inherit;
+	z-index: -1;
+	pointer-events: none;
+}
+body.dark-mode .message-name {
+	color: white;
+	opacity: .7;
+	background-color: #0004;
+}
+
+
+
+body {
+	margin: 0;
+	font-family: Arial, sans-serif;
+	background-color: var(--page-bg);
+	color: var(--text-color);
+}
+
+.chat-container {
+	background-color: var(--container-bg);
+}
+
+.header {
+	background-color: var(--header-bg);
+	color: var(--header-text);
+}
+
+.messages {
+	background-color: var(--messages-bg);
+}
+
+.message {
+	color: var(--message-text);
+}
+
+.message small {
+	color: var(--message-meta);
+}
+
+.input-area {
+	background-color: var(--container-bg);
+	border-top: 1px solid var(--border-color);
+}
+
+.input-area textarea {
+	background-color: var(--input-bg);
+	color: var(--input-text);
+	border-color: var(--input-border);
+}
+
+.input-area button {
+	background-color: var(--button-bg);
+	color: var(--button-text);
+}
+
+.message-context-menu {
+	background-color: var(--menu-bg);
+	border-color: var(--border-color);
+	color: var(--text-color);
+}
+
+.message-context-menu button {
+	background-color: var(--menu-bg);
+	color: var(--text-color);
+}
+
+.message-context-menu button:hover {
+	background-color: var(--menu-hover);
+}
+
+.typing-bubble {
+	background-color: var(--typing-bg);
+}
+
+.typing-bubble span {
+	background-color: var(--typing-dot);
+}
 </style>
 </head>
 
-<body>
+<body class="<?= $sleepMode ? 'sleep-mode' : '' ?>">
 
 <div class="chat-container">
 
@@ -1250,7 +1490,7 @@ MESSAGE CONTEXT MENU
 					<div class="message-reply"
 						data-reply-target="<?= (int)$msg['reply_to_id'] ?>">
 
-						<strong>Replying to <?= 
+						<strong>Replying to <?=
 							($msg['reply_sender_id'] ?? '') === ($_COOKIE['chat_id'] ?? '')
 							? 'you'
 							: htmlspecialchars(
@@ -1983,6 +2223,19 @@ function parseLinks(text) {
 			'</a>' + trailing;
 
 	}).replace(/\n/g, '<br>');
+}
+
+
+/* =================================
+   RESTORE COLOR MODE
+================================= */
+
+const savedTheme = getCookie('dark_mode');
+
+if (savedTheme === '1') {
+	document.body.classList.add('dark-mode');
+} else {
+	document.body.classList.remove('dark-mode');
 }
 
 /* =================================
@@ -2821,7 +3074,13 @@ chatForm.addEventListener('submit', async function(e) {
 			'Change or remove the chat header title.\n\n' +
 
 			'/beep [on|off]\n' +
-			'Enable/disable sound notifications for you.\n\n'
+			'Enable/disable sound notifications for you.\n\n' +
+
+			'/dark, /light, /day, /night\n' +
+			'Change between dark mode and light mode.\n\n' +
+
+			'/clear, /show\n' +
+			'Clear away the whole screen except the input and button.\n\n'
 		);
 
 		return;
@@ -2860,7 +3119,13 @@ chatForm.addEventListener('submit', async function(e) {
 			'Display or change the current chat history limit.\n\n' +
 
 			'/refresh\n' +
-			'Refresh everyone\'s chat page.\n\n'
+			'Refresh everyone\'s chat page.\n\n' +
+
+			'/dark, /light, /day, /night\n' +
+			'Change between dark mode and light mode.\n\n' +
+
+			'/clear, /show\n' +
+			'Clear away the whole screen except the input and button.\n\n'
 		);
 
 		return;
@@ -2893,8 +3158,40 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
-	// BEEP COMMANDS
+	if (
+		text.toLowerCase() === '/night' ||
+		text.toLowerCase() === '/dark'
+	) {
 
+		document.body.classList.add('dark-mode');
+		setCookie('dark_mode', '1');
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	if (
+		text.toLowerCase() === '/day' ||
+		text.toLowerCase() === '/light'
+	) {
+
+		document.body.classList.remove('dark-mode');
+		setCookie('dark_mode', '0');
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+
+	// BEEP COMMANDS
 	if (
 		text.toLowerCase() === '/beep' ||
 		text.toLowerCase() === '/beep on'
@@ -2924,16 +3221,65 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
-	// SHOW COMMAND
+	// SLEEP MODE COMMANDS
 	if (
-		text.toLowerCase() === '/show' ||
+		text.toLowerCase() === '/sleep' ||
+		text.toLowerCase() === '/clear' ||
+		text.toLowerCase() === '/show'
+	) {
+
+		const sleepMode = (
+			text.toLowerCase() === '/clear' ||
+			text.toLowerCase() === '/sleep'
+		) ? '1' : '0';
+
+		const formData = new FormData();
+
+		formData.append('action', 'set_sleep_mode');
+		formData.append('value', sleepMode);
+
+		try {
+
+			const response = await fetch('', {
+				method: 'POST',
+				body: formData
+			});
+
+			const result = await response.json();
+
+			if (!result.success) {
+				alert('Unable to change sleep mode.');
+			}
+
+		} catch (error) {
+
+			alert('Unable to change sleep mode.');
+
+		}
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		if (document.activeElement === messageInput) {
+			sessionStorage.setItem('restoreChatFocus', '1');
+		}
+
+		// Refresh this user's chat immediately
+		location.reload();
+
+		return;
+	}
+
+	// LIMIT COMMAND
+	if (
 		text.toLowerCase() === '/limit'
 	) {
 
 		try {
 
 			const response = await fetch('?action=get_limit');
-
 			const result = await response.json();
 
 			if (result.success) {
@@ -2955,7 +3301,6 @@ chatForm.addEventListener('submit', async function(e) {
 	}
 
 	if (
-		text.toLowerCase().startsWith('/show ') ||
 		text.toLowerCase().startsWith('/limit ')
 	) {
 
