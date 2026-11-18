@@ -61,17 +61,17 @@ CREATE TABLE IF NOT EXISTS chat_users (
 /* CREATE SETTINGS TABLE */
 $pdo->exec("
 CREATE TABLE IF NOT EXISTS chat_settings (
-    setting VARCHAR(64) PRIMARY KEY,
-    value TEXT NULL
+	setting VARCHAR(64) PRIMARY KEY,
+	value TEXT NULL
 )
 ");
 
 /* LOAD CUSTOM PAGE HEADER */
 
 $stmt = $pdo->prepare("
-    SELECT value
-    FROM chat_settings
-    WHERE setting = 'page_header'
+	SELECT value
+	FROM chat_settings
+	WHERE setting = 'page_header'
 ");
 
 $stmt->execute();
@@ -79,7 +79,25 @@ $stmt->execute();
 $customPageHeader = $stmt->fetchColumn();
 
 if ($customPageHeader === false) {
-    $customPageHeader = $page_header;
+	$customPageHeader = $page_header;
+}
+
+/* LOAD CHAT HISTORY LIMIT */
+
+$stmt = $pdo->prepare("
+	SELECT value
+	FROM chat_settings
+	WHERE setting = 'show_limit'
+");
+
+$stmt->execute();
+
+$showLimit = $stmt->fetchColumn();
+
+if ($showLimit === false || !ctype_digit((string)$showLimit)) {
+	$showLimit = 4600;
+} else {
+	$showLimit = max(0, min(50000, (int)$showLimit));
 }
 
 /* =================================
@@ -196,7 +214,6 @@ if (
 	$newHeader = trim($_POST['header'] ?? '');
 
 	if (
-		$newHeader === '' ||
 		mb_strlen($newHeader) > 100
 	) {
 		echo json_encode(['success' => false]);
@@ -241,6 +258,125 @@ if (($_GET['action'] ?? '') === 'get_header') {
 		'success' => true,
 		'header' => $header
 	]);
+
+	exit;
+}
+
+/* =================================
+   SET CHAT HISTORY LIMIT
+================================= */
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	($_POST['action'] ?? '') === 'set_limit'
+) {
+
+	header('Content-Type: application/json');
+
+	$newLimit = trim($_POST['limit'] ?? '');
+
+	if (
+		!ctype_digit($newLimit) ||
+		(int)$newLimit < 0 ||
+		(int)$newLimit > 50000
+	) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$newLimit = (int)$newLimit;
+
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_settings (setting, value)
+		VALUES ('show_limit', ?)
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	");
+
+	$stmt->execute([$newLimit]);
+
+	echo json_encode([
+		'success' => true,
+		'limit' => $newLimit
+	]);
+
+	exit;
+}
+
+
+/* =================================
+FETCH CHAT HISTORY LIMIT
+================================= */
+
+if (($_GET['action'] ?? '') === 'get_limit') {
+
+	header('Content-Type: application/json');
+
+	$stmt = $pdo->prepare("
+		SELECT value
+		FROM chat_settings
+		WHERE setting = 'show_limit'
+	");
+
+	$stmt->execute();
+
+	$limit = $stmt->fetchColumn();
+
+	if ($limit === false || !ctype_digit((string)$limit)) {
+		$limit = 4600;
+	} else {
+		$limit = max(0, min(50000, (int)$limit));
+	}
+
+	echo json_encode([
+		'success' => true,
+		'limit' => $limit
+	]);
+
+	exit;
+}
+
+/* =================================
+   REFRESH ALL CLIENTS
+================================= */
+
+if (($_GET['action'] ?? '') === 'get_refresh') {
+
+	header('Content-Type: application/json');
+
+	$stmt = $pdo->prepare("
+		SELECT value
+		FROM chat_settings
+		WHERE setting = 'refresh_version'
+	");
+
+	$stmt->execute();
+
+	$version = $stmt->fetchColumn();
+
+	echo json_encode([
+		'success' => true,
+		'version' => $version ?: '0'
+	]);
+
+	exit;
+}
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	($_POST['action'] ?? '') === 'refresh_all'
+) {
+
+	header('Content-Type: application/json');
+
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_settings (setting, value)
+		VALUES ('refresh_version', ?)
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	");
+
+	$stmt->execute([(string)microtime(true)]);
+
+	echo json_encode(['success' => true]);
 
 	exit;
 }
@@ -425,7 +561,7 @@ $initialMessages = $pdo->query("
 		SELECT *
 		FROM chat_messages
 		ORDER BY id DESC
-		LIMIT 4600
+		LIMIT $showLimit
 	) AS m
 
 	LEFT JOIN chat_messages r
@@ -1378,9 +1514,10 @@ bubbleColorPicker.addEventListener('input', function() {
 
 /* CHAT IDENTITY */
 
-let lastId = <?= !empty($initialMessages)
-	? (int)end($initialMessages)['id']
-	: 0 ?>;
+let lastId = <?= (int)$pdo->query("
+	SELECT COALESCE(MAX(id), 0)
+	FROM chat_messages
+")->fetchColumn() ?>;
 
 let loading = false;
 
@@ -2439,6 +2576,11 @@ async function sendTypingStatus(hasDraft, active) {
 
 }
 
+/* RESET TYPING STATUS ON PAGE LOAD */
+
+if (messageInput.value.trim() === '') {
+	sendTypingStatus(false, false);
+}
 
 /* USER STARTS TYPING */
 
@@ -2576,6 +2718,69 @@ chatForm.addEventListener('submit', async function(e) {
 	if (!text) return;
 
 	// CHAT COMMANDS
+	if (
+		text.toLowerCase() === '/help'
+	) {
+
+		alert(
+			'/help\n' +
+			'Display this command list.\n\n' +
+
+			'/name [name]\n' +
+			'Change or remove your display name.\n\n' +
+
+			'/title [title]\n' +
+			'Change or remove the title of the page.\n\n' +
+
+			'/beep [on|off]\n' +
+			'Enable/disable sound notifications for you.\n\n'
+		);
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	if (
+		text.toLowerCase() === '/help admin' ||
+		text.toLowerCase() === '/help addy'
+	) {
+
+		alert(
+			'/help admin\n' +
+			'Display this command list.\n\n' +
+
+			'/left, /right\n' +
+			'Move your message bubble to the left or right.\n\n' +
+
+			'/name [name]\n' +
+			'Change or remove your display name.\n\n' +
+
+			'/title [title]\n' +
+			'Change or remove the title of the page.\n\n' +
+
+			'/beep [on|off]\n' +
+			'Enable/disable sound notifications for you.\n\n' +
+
+			'/limit [N]\n' +
+			'Display or change the current chat history limit.\n\n' +
+
+			'/refresh\n' +
+			'Refresh everyone\'s chat page.\n\n'
+		);
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	// BUBBLE POSITION COMMANDS
 	if (text.toLowerCase() === '/left') {
 
 		bubblePosition = 'left';
@@ -2633,19 +2838,132 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
-	// TITLE COMMAND
+	// SHOW COMMAND
+	if (
+		text.toLowerCase() === '/show' ||
+		text.toLowerCase() === '/limit'
+	) {
 
-	if (text.toLowerCase().startsWith('/title ')) {
+		try {
 
-		const newHeader = text.substring(7).trim();
+			const response = await fetch('?action=get_limit');
 
-		if (!newHeader) {
-			messageInput.value = '';
-			resizeMessageInput();
-			messageInput.dispatchEvent(new Event('input'));
-			return;
+			const result = await response.json();
+
+			if (result.success) {
+				alert('Current chat history limit: ' + result.limit);
+			} else {
+				alert('Unable to retrieve chat history limit.');
+			}
+
+		} catch (error) {
+			alert('Unable to retrieve chat history limit.');
 		}
 
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	if (
+		text.toLowerCase().startsWith('/show ') ||
+		text.toLowerCase().startsWith('/limit ')
+	) {
+
+		const newLimit = text.substring(6).trim();
+
+		if (
+			!/^[0-9]+$/.test(newLimit) ||
+			Number(newLimit) < 0 ||
+			Number(newLimit) > 50000
+		) {
+
+			alert('Usage: /limit N (0-50000)');
+
+			return;
+
+		}
+
+		const formData = new FormData();
+
+		formData.append('action', 'set_limit');
+		formData.append('limit', newLimit);
+
+		try {
+
+			const response = await fetch('', {
+				method: 'POST',
+				body: formData
+			});
+
+			const result = await response.json();
+
+			if (result.success) {
+
+				// Clear the command
+				messageInput.value = '';
+				resizeMessageInput();
+				messageInput.dispatchEvent(new Event('input'));
+
+				// Refresh this user's chat immediately
+				location.reload();
+
+			} else {
+
+				alert('Unable to change chat history limit.');
+
+			}
+
+		} catch (error) {
+
+			alert('Unable to change chat history limit.');
+
+		}
+
+		return;
+	}
+
+	// REFRESH COMMAND
+
+	if (text.toLowerCase() === '/refresh') {
+
+		const formData = new FormData();
+
+		formData.append('action', 'refresh_all');
+
+		try {
+
+			const response = await fetch('', {
+				method: 'POST',
+				body: formData
+			});
+
+			const result = await response.json();
+
+			if (!result.success) {
+				alert('Unable to refresh everyone.');
+			}
+
+		} catch (error) {
+			alert('Unable to refresh everyone.');
+		}
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
+	// TITLE COMMAND
+
+	if (text.toLowerCase().startsWith('/title')) {
+
+		const newHeader = text.substring(6).trim();
 		const formData = new FormData();
 
 		formData.append('action', 'set_header');
@@ -2840,6 +3158,90 @@ updatePageHeader();
 
 // Check every second
 setInterval(updatePageHeader, 1000);
+
+/* =================================
+   SYNCHRONIZE CHAT HISTORY LIMIT
+================================= */
+
+// Remember the limit loaded when this page opened
+const initialShowLimit = <?= (int)$showLimit ?>;
+
+async function checkShowLimit() {
+
+	try {
+
+		const response = await fetch('?action=get_limit');
+
+		if (!response.ok) return;
+
+		const data = await response.json();
+
+		if (!data.success) return;
+
+		// Another user has changed the history limit
+		if (Number(data.limit) !== initialShowLimit) {
+
+			location.reload();
+
+		}
+
+	} catch (error) {
+
+		console.error('Chat history synchronization failed:', error);
+
+	}
+
+}
+
+// Check immediately
+checkShowLimit();
+
+// Check every second
+setInterval(checkShowLimit, 1000);
+
+/* =================================
+   SYNCHRONIZE REFRESH COMMAND
+================================= */
+
+let lastRefreshVersion = null;
+
+async function checkRefreshVersion() {
+
+	try {
+
+		const response = await fetch('?action=get_refresh');
+
+		if (!response.ok) return;
+
+		const data = await response.json();
+
+		if (!data.success) return;
+
+		if (lastRefreshVersion === null) {
+
+			lastRefreshVersion = data.version;
+
+			return;
+
+		}
+
+		if (data.version !== lastRefreshVersion) {
+
+			location.reload();
+
+		}
+
+	} catch (error) {
+
+		console.error('Refresh synchronization failed:', error);
+
+	}
+
+}
+
+checkRefreshVersion();
+
+setInterval(checkRefreshVersion, 1000);
 
 </script>
 
