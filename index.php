@@ -67,31 +67,36 @@ CREATE TABLE IF NOT EXISTS chat_settings (
 ");
 
 /* LOAD CUSTOM PAGE HEADER */
-
 $stmt = $pdo->prepare("
 	SELECT value
 	FROM chat_settings
 	WHERE setting = 'page_header'
 ");
-
 $stmt->execute();
-
 $customPageHeader = $stmt->fetchColumn();
-
 if ($customPageHeader === false) {
 	$customPageHeader = $page_header;
 }
 
-/* LOAD CHAT HISTORY LIMIT */
+/* LOAD CUSTOM PAGE TITLE */
+$stmt = $pdo->prepare("
+	SELECT value
+	FROM chat_settings
+	WHERE setting = 'page_title'
+");
+$stmt->execute();
+$customPageTitle = $stmt->fetchColumn();
+if ($customPageTitle === false) {
+	$customPageTitle = $page_title;
+}
 
+/* LOAD CHAT HISTORY LIMIT */
 $stmt = $pdo->prepare("
 	SELECT value
 	FROM chat_settings
 	WHERE setting = 'show_limit'
 ");
-
 $stmt->execute();
-
 $showLimit = $stmt->fetchColumn();
 
 if ($showLimit === false || !ctype_digit((string)$showLimit)) {
@@ -257,6 +262,68 @@ if (($_GET['action'] ?? '') === 'get_header') {
 	echo json_encode([
 		'success' => true,
 		'header' => $header
+	]);
+
+	exit;
+}
+
+/* =================================
+   SET PAGE TITLE
+================================= */
+
+if (
+	$_SERVER['REQUEST_METHOD'] === 'POST' &&
+	($_POST['action'] ?? '') === 'set_title'
+) {
+
+	header('Content-Type: application/json');
+
+	$newTitle = trim($_POST['title'] ?? '');
+
+	if (
+		mb_strlen($newTitle) > 100
+	) {
+		echo json_encode(['success' => false]);
+		exit;
+	}
+
+	$stmt = $pdo->prepare("
+		INSERT INTO chat_settings (setting, value)
+		VALUES ('page_title', ?)
+		ON DUPLICATE KEY UPDATE value = VALUES(value)
+	");
+
+	$stmt->execute([$newTitle]);
+
+	echo json_encode(['success' => true]);
+	exit;
+}
+
+/* =================================
+   FETCH PAGE TITLE
+================================= */
+
+if (($_GET['action'] ?? '') === 'get_title') {
+
+	header('Content-Type: application/json');
+
+	$stmt = $pdo->prepare("
+		SELECT value
+		FROM chat_settings
+		WHERE setting = 'page_title'
+	");
+
+	$stmt->execute();
+
+	$title = $stmt->fetchColumn();
+
+	if ($title === false) {
+		$title = $page_title;
+	}
+
+	echo json_encode([
+		'success' => true,
+		'title' => $title
 	]);
 
 	exit;
@@ -578,7 +645,7 @@ $initialMessages = $pdo->query("
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
-<title><?= htmlspecialchars($page_title) ?></title>
+<title><?= htmlspecialchars($customPageTitle) ?></title>
 
 <style>
 * {
@@ -1342,17 +1409,17 @@ let selectedMessage = null;
 
 function resizeMessageInput() {
 
-messageInput.style.height = 'auto';
+	messageInput.style.height = 'auto';
 
-const maxHeight = 180;
+	const maxHeight = 180;
 
-messageInput.style.height =
-	Math.min(messageInput.scrollHeight, maxHeight) + 'px';
+	messageInput.style.height =
+		Math.min(messageInput.scrollHeight, maxHeight) + 'px';
 
-messageInput.style.overflowY =
-	messageInput.scrollHeight > maxHeight
-	? 'auto'
-	: 'hidden';
+	messageInput.style.overflowY =
+		messageInput.scrollHeight > maxHeight
+		? 'auto'
+		: 'hidden';
 
 }
 
@@ -2730,7 +2797,7 @@ chatForm.addEventListener('submit', async function(e) {
 			'Change or remove your display name.\n\n' +
 
 			'/title [title]\n' +
-			'Change or remove the title of the page.\n\n' +
+			'Change or remove the chat header title.\n\n' +
 
 			'/beep [on|off]\n' +
 			'Enable/disable sound notifications for you.\n\n'
@@ -2760,7 +2827,10 @@ chatForm.addEventListener('submit', async function(e) {
 			'Change or remove your display name.\n\n' +
 
 			'/title [title]\n' +
-			'Change or remove the title of the page.\n\n' +
+			'Change or remove the chat header title.\n\n' +
+
+			'/pagetitle [title]\n' +
+			'Change or remove the HTML title of the page.\n\n' +
 
 			'/beep [on|off]\n' +
 			'Enable/disable sound notifications for you.\n\n' +
@@ -2996,6 +3066,43 @@ chatForm.addEventListener('submit', async function(e) {
 		return;
 	}
 
+	// PAGE TITLE COMMAND
+
+	if (text.toLowerCase().startsWith('/pagetitle')) {
+
+		const newTitle = text.substring(10).trim();
+		const formData = new FormData();
+
+		formData.append('action', 'set_title');
+		formData.append('title', newTitle);
+
+		try {
+
+			const response = await fetch('', {
+				method: 'POST',
+				body: formData
+			});
+
+			const result = await response.json();
+
+			if (result.success) {
+				document.querySelector('title').textContent = newTitle;
+			} else {
+				alert('Unable to change page title.');
+			}
+
+		} catch (error) {
+			alert('Unable to change page title.');
+		}
+
+		messageInput.value = '';
+		resizeMessageInput();
+		messageInput.dispatchEvent(new Event('input'));
+		messageInput.focus();
+
+		return;
+	}
+
 	// NAME COMMAND
 
 	if (text.toLowerCase().startsWith('/name')) {
@@ -3158,6 +3265,46 @@ updatePageHeader();
 
 // Check every second
 setInterval(updatePageHeader, 1000);
+
+
+/* =================================
+   SYNCHRONIZE PAGE TITLE
+================================= */
+
+async function updatePageTitle() {
+
+	try {
+
+		const response = await fetch('?action=get_title');
+
+		if (!response.ok) return;
+
+		const data = await response.json();
+
+		if (data.success) {
+
+			const title = document.querySelector('title');
+
+			if (title && title.textContent !== data.title) {
+				title.textContent = data.title;
+			}
+
+		}
+
+	} catch (error) {
+
+		console.error('Page title update failed:', error);
+
+	}
+
+}
+
+// Check immediately
+updatePageTitle();
+
+// Check every second
+setInterval(updatePageTitle, 1000);
+
 
 /* =================================
    SYNCHRONIZE CHAT HISTORY LIMIT
