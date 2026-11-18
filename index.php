@@ -1403,6 +1403,22 @@ let lastTypingSent = 0;
 let replyToId = null;
 let selectedMessage = null;
 
+
+/* =================================
+   RESTORE CHAT FOCUS AFTER REFRESH
+================================= */
+
+const restoreChatFocus =
+	sessionStorage.getItem('restoreChatFocus') === '1';
+
+sessionStorage.removeItem('restoreChatFocus');
+
+if (restoreChatFocus) {
+	window.addEventListener('DOMContentLoaded', function() {
+		messageInput.focus();
+	});
+}
+
 /* =================================
    AUTO-EXPANDING MESSAGE INPUT
 ================================= */
@@ -2998,7 +3014,10 @@ chatForm.addEventListener('submit', async function(e) {
 
 	// REFRESH COMMAND
 
-	if (text.toLowerCase() === '/refresh') {
+	if (
+		text.toLowerCase() === '/reload' ||
+		text.toLowerCase() === '/refresh'
+	) {
 
 		const formData = new FormData();
 
@@ -3373,6 +3392,10 @@ async function checkRefreshVersion() {
 		}
 
 		if (data.version !== lastRefreshVersion) {
+
+			if (document.activeElement === messageInput) {
+				sessionStorage.setItem('restoreChatFocus', '1');
+			}
 
 			location.reload();
 
